@@ -716,6 +716,14 @@ function tagsToRecord(t: Mp3Tags): Record<string, string> {
   return rest as Record<string, string>;
 }
 
+function renamedFilename(m: Mp3File, pattern: string): string {
+  const orig = m.file.name;
+  const dot = orig.lastIndexOf(".");
+  const ext = dot > 0 ? orig.slice(dot) : ".mp3";
+  const base = dot > 0 ? orig.slice(0, dot) : orig;
+  return renameByPattern(pattern, m.tags, base) + ext;
+}
+
 function pickNonEmpty(o: Record<string, string | undefined>): Partial<Mp3Tags> {
   const out: Partial<Mp3Tags> = {};
   for (const [k, v] of Object.entries(o)) {
