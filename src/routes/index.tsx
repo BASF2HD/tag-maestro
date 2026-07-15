@@ -22,7 +22,16 @@ import {
   Download,
   Loader2,
   Search,
+  MoreVertical,
 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   readMp3,
   writeTagsToBlob,
@@ -33,6 +42,7 @@ import {
   SUPPORTED_ACCEPT,
   type Mp3File,
   type Mp3Tags,
+  type FileMeta,
 } from "@/lib/mp3";
 import {
   aiParseFilename,
@@ -48,15 +58,63 @@ export const Route = createFileRoute("/")({
 const MULTI = "<keep>";
 
 type TagKey = keyof Omit<Mp3Tags, "cover">;
+type MetaKey = keyof FileMeta;
+
+type ColumnKind = "tag" | "filename" | "path" | "cover" | "meta";
+type TableColumnKey = TagKey | "filename" | "path" | "cover" | MetaKey;
+
+type TableColumn = {
+  key: TableColumnKey;
+  label: string;
+  kind: ColumnKind;
+  className?: string;
+  defaultVisible?: boolean;
+};
+
 const FIELDS: { key: TagKey; label: string }[] = [
-  { key: "title", label: "Title" },
-  { key: "artist", label: "Artist" },
-  { key: "album", label: "Album" },
-  { key: "albumArtist", label: "Album Artist" },
-  { key: "year", label: "Year" },
-  { key: "genre", label: "Genre" },
   { key: "track", label: "Track" },
+  { key: "title", label: "Title" },
+  { key: "album", label: "Album" },
+  { key: "artist", label: "Artist" },
+  { key: "albumArtist", label: "Album Artist" },
+  { key: "composer", label: "Composer" },
+  { key: "year", label: "Year" },
+  { key: "tag", label: "Tag" },
+  { key: "genre", label: "Genre" },
+  { key: "discnumber", label: "Discnumber" },
+  { key: "comment", label: "Comment" },
+  { key: "bpm", label: "BPM" },
 ];
+
+const TABLE_COLUMNS: TableColumn[] = [
+  { key: "track", label: "Track", kind: "tag", className: "w-14", defaultVisible: true },
+  { key: "filename", label: "Filename", kind: "filename", defaultVisible: true },
+  { key: "path", label: "Path", kind: "path", defaultVisible: false },
+  { key: "title", label: "Title", kind: "tag", defaultVisible: true },
+  { key: "album", label: "Album", kind: "tag", defaultVisible: true },
+  { key: "artist", label: "Artist", kind: "tag", defaultVisible: true },
+  { key: "albumArtist", label: "Album Artist", kind: "tag", defaultVisible: true },
+  { key: "composer", label: "Composer", kind: "tag", defaultVisible: true },
+  { key: "year", label: "Year", kind: "tag", className: "w-16", defaultVisible: true },
+  { key: "tag", label: "Tag", kind: "tag", defaultVisible: false },
+  { key: "genre", label: "Genre", kind: "tag", defaultVisible: true },
+  { key: "discnumber", label: "Discnumber", kind: "tag", className: "w-16", defaultVisible: true },
+  { key: "comment", label: "Comment", kind: "tag", defaultVisible: true },
+  { key: "bpm", label: "BPM", kind: "tag", className: "w-14", defaultVisible: false },
+  { key: "cover", label: "Cover", kind: "cover", className: "w-14", defaultVisible: false },
+  { key: "codec", label: "Codec", kind: "meta", defaultVisible: false },
+  { key: "bitrate", label: "Bitrate", kind: "meta", defaultVisible: false },
+  { key: "frequency", label: "Frequency", kind: "meta", defaultVisible: false },
+  { key: "length", label: "Length", kind: "meta", className: "w-14", defaultVisible: true },
+  { key: "vbr", label: "VBR", kind: "meta", className: "w-12", defaultVisible: false },
+  { key: "mode", label: "Mode", kind: "meta", defaultVisible: false },
+  { key: "size", label: "Size", kind: "meta", defaultVisible: false },
+  { key: "modified", label: "Modified", kind: "meta", defaultVisible: false },
+];
+
+const DEFAULT_VISIBLE_COLUMNS = new Set(
+  TABLE_COLUMNS.filter((c) => c.defaultVisible).map((c) => c.key),
+);
 
 function TagForge() {
   const [files, setFiles] = useState<Mp3File[]>([]);
@@ -524,6 +582,24 @@ function FileTable({
   onEdit: (id: string, key: TagKey, value: string) => void;
 }) {
   const allSelected = files.length > 0 && files.every((f) => selected.has(f.id));
+  const [visibleColumns, setVisibleColumns] = useState<Set<TableColumnKey>>(
+    () => new Set(DEFAULT_VISIBLE_COLUMNS),
+  );
+
+  function toggleColumn(key: TableColumnKey) {
+    setVisibleColumns((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        if (next.size > 1) next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  }
+
+  const visible = TABLE_COLUMNS.filter((c) => visibleColumns.has(c.key));
+
   return (
     <div className="flex-1 overflow-auto">
       <table className="w-full text-xs border-collapse">
@@ -536,13 +612,43 @@ function FileTable({
                 aria-label="Select all"
               />
             </th>
-            <th className="px-2 py-2 text-left font-medium">Title</th>
-            <th className="px-2 py-2 text-left font-medium">Artist</th>
-            <th className="px-2 py-2 text-left font-medium">Album</th>
-            <th className="px-2 py-2 text-left font-medium w-16">Year</th>
-            <th className="px-2 py-2 text-left font-medium w-14">Track</th>
-            <th className="px-2 py-2 text-left font-medium">Genre</th>
-            <th className="px-2 py-2 text-left font-medium">Filename</th>
+            {visible.map((col) => (
+              <th
+                key={col.key}
+                className={`px-2 py-2 text-left font-medium ${col.className ?? ""}`}
+              >
+                {col.label}
+              </th>
+            ))}
+            <th className="w-8 px-1 py-2 text-right">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                    aria-label="Toggle columns"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <MoreVertical className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-48 max-h-80 overflow-y-auto">
+                  <DropdownMenuLabel className="text-xs">Customize…</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  {TABLE_COLUMNS.map((col) => (
+                    <DropdownMenuCheckboxItem
+                      key={col.key}
+                      checked={visibleColumns.has(col.key)}
+                      onCheckedChange={() => toggleColumn(col.key)}
+                      onSelect={(e) => e.preventDefault()}
+                    >
+                      {col.label}
+                    </DropdownMenuCheckboxItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -563,25 +669,68 @@ function FileTable({
                     aria-label="Select"
                   />
                 </td>
-                <TdCell value={f.tags.title} onChange={(v) => onEdit(f.id, "title", v)} />
-                <TdCell value={f.tags.artist} onChange={(v) => onEdit(f.id, "artist", v)} />
-                <TdCell value={f.tags.album} onChange={(v) => onEdit(f.id, "album", v)} />
-                <TdCell value={f.tags.year} onChange={(v) => onEdit(f.id, "year", v)} />
-                <TdCell value={f.tags.track} onChange={(v) => onEdit(f.id, "track", v)} />
-                <TdCell value={f.tags.genre} onChange={(v) => onEdit(f.id, "genre", v)} />
-                <td
-                  className="px-2 py-1.5 text-muted-foreground truncate max-w-[220px]"
-                  title={f.file.name}
-                >
-                  {f.dirty && <span className="text-primary mr-1">●</span>}
-                  {f.file.name}
-                </td>
+                {visible.map((col) => (
+                  <TableCell key={col.key} file={f} col={col} onEdit={onEdit} />
+                ))}
+                <td className="w-8" />
               </tr>
             );
           })}
         </tbody>
       </table>
     </div>
+  );
+}
+
+function TableCell({
+  file,
+  col,
+  onEdit,
+}: {
+  file: Mp3File;
+  col: TableColumn;
+  onEdit: (id: string, key: TagKey, value: string) => void;
+}) {
+  if (col.kind === "tag") {
+    return (
+      <TdCell
+        value={file.tags[col.key as TagKey]}
+        onChange={(v) => onEdit(file.id, col.key as TagKey, v)}
+      />
+    );
+  }
+
+  if (col.kind === "cover") {
+    return (
+      <td className="px-2 py-1.5">
+        {file.tags.cover?.dataUrl ? (
+          <img
+            src={file.tags.cover.dataUrl}
+            alt=""
+            className="h-6 w-6 rounded object-cover"
+          />
+        ) : null}
+      </td>
+    );
+  }
+
+  const readOnly =
+    col.kind === "filename"
+      ? file.file.name
+      : col.kind === "path"
+        ? file.meta.path
+        : file.meta[col.key as MetaKey];
+
+  return (
+    <td
+      className="px-2 py-1.5 text-muted-foreground truncate max-w-[220px]"
+      title={readOnly}
+    >
+      {col.kind === "filename" && file.dirty && (
+        <span className="text-primary mr-1">●</span>
+      )}
+      {readOnly}
+    </td>
   );
 }
 
@@ -613,7 +762,7 @@ function EditorPanel({
 }: {
   tags: Mp3Tags;
   count: number;
-  onChange: (key: TagKey | "comment", value: string) => void;
+  onChange: (key: TagKey, value: string) => void;
   onCoverPick: (file: File) => void;
   onCoverClear: () => void;
 }) {
@@ -682,28 +831,31 @@ function EditorPanel({
       </div>
 
       <div className="px-4 pb-4 space-y-3">
-        {FIELDS.map((f) => (
-          <div key={f.key} className="space-y-1">
-            <Label className="text-[11px] text-muted-foreground">{f.label}</Label>
-            <Input
-              disabled={count === 0}
-              value={tags[f.key] === MULTI ? "" : tags[f.key]}
-              placeholder={tags[f.key] === MULTI ? "<multiple values>" : ""}
-              onChange={(e) => onChange(f.key, e.target.value)}
-              className="h-8 text-sm"
-            />
-          </div>
-        ))}
-        <div className="space-y-1">
-          <Label className="text-[11px] text-muted-foreground">Comment</Label>
-          <Textarea
-            disabled={count === 0}
-            value={tags.comment === MULTI ? "" : tags.comment}
-            placeholder={tags.comment === MULTI ? "<multiple values>" : ""}
-            onChange={(e) => onChange("comment", e.target.value)}
-            className="text-sm min-h-[70px]"
-          />
-        </div>
+        {FIELDS.map((f) =>
+          f.key === "comment" ? (
+            <div key={f.key} className="space-y-1">
+              <Label className="text-[11px] text-muted-foreground">{f.label}</Label>
+              <Textarea
+                disabled={count === 0}
+                value={tags.comment === MULTI ? "" : tags.comment}
+                placeholder={tags.comment === MULTI ? "<multiple values>" : ""}
+                onChange={(e) => onChange("comment", e.target.value)}
+                className="text-sm min-h-[70px]"
+              />
+            </div>
+          ) : (
+            <div key={f.key} className="space-y-1">
+              <Label className="text-[11px] text-muted-foreground">{f.label}</Label>
+              <Input
+                disabled={count === 0}
+                value={tags[f.key] === MULTI ? "" : tags[f.key]}
+                placeholder={tags[f.key] === MULTI ? "<multiple values>" : ""}
+                onChange={(e) => onChange(f.key, e.target.value)}
+                className="h-8 text-sm"
+              />
+            </div>
+          ),
+        )}
       </div>
     </div>
   );

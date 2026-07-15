@@ -26,11 +26,27 @@ export interface Mp3Tags {
   artist: string;
   album: string;
   albumArtist: string;
+  composer: string;
   year: string;
+  tag: string;
   genre: string;
+  discnumber: string;
   track: string;
   comment: string;
+  bpm: string;
   cover?: { data: Uint8Array; mime: string; dataUrl: string };
+}
+
+export interface FileMeta {
+  path: string;
+  codec: string;
+  bitrate: string;
+  frequency: string;
+  length: string;
+  vbr: string;
+  mode: string;
+  size: string;
+  modified: string;
 }
 
 export interface Mp3File {
@@ -39,6 +55,7 @@ export interface Mp3File {
   arrayBuffer: ArrayBuffer;
   format: AudioFormat;
   tags: Mp3Tags;
+  meta: FileMeta;
   original: Mp3Tags;
   dirty: boolean;
 }
@@ -48,11 +65,81 @@ export const emptyTags = (): Mp3Tags => ({
   artist: "",
   album: "",
   albumArtist: "",
+  composer: "",
   year: "",
+  tag: "",
   genre: "",
+  discnumber: "",
   track: "",
   comment: "",
+  bpm: "",
 });
+
+export const emptyMeta = (): FileMeta => ({
+  path: "",
+  codec: "",
+  bitrate: "",
+  frequency: "",
+  length: "",
+  vbr: "",
+  mode: "",
+  size: "",
+  modified: "",
+});
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+function formatDuration(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return "";
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+async function readAudioMeta(
+  file: File,
+  format: AudioFormat,
+  arrayBuffer: ArrayBuffer,
+): Promise<FileMeta> {
+  const path =
+    (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name;
+  const meta: FileMeta = {
+    path,
+    codec: format === "other" ? "Unknown" : format.toUpperCase(),
+    bitrate: "",
+    frequency: "",
+    length: "",
+    vbr: "",
+    mode: "",
+    size: formatBytes(file.size),
+    modified: new Date(file.lastModified).toLocaleString(),
+  };
+
+  try {
+    const ctx = new AudioContext();
+    const decoded = await ctx.decodeAudioData(arrayBuffer.slice(0));
+    meta.length = formatDuration(decoded.duration);
+    meta.frequency = `${decoded.sampleRate} Hz`;
+    meta.mode =
+      decoded.numberOfChannels === 1
+        ? "Mono"
+        : decoded.numberOfChannels === 2
+          ? "Stereo"
+          : `${decoded.numberOfChannels}ch`;
+    if (decoded.duration > 0) {
+      meta.bitrate = `${Math.round((file.size * 8) / decoded.duration / 1000)} kbps`;
+    }
+    await ctx.close();
+  } catch {
+    // Some formats may fail to decode in the browser; leave technical fields empty.
+  }
+
+  return meta;
+}
 
 function u8ToDataUrl(u8: Uint8Array, mime: string): string {
   let bin = "";
@@ -72,10 +159,14 @@ export async function readMp3(file: File): Promise<Mp3File> {
         t.artist = g.artist || "";
         t.album = g.album || "";
         t.albumArtist = g.band || g["TPE2"]?.data || "";
+        t.composer = g.composer || "";
         t.year = String(g.year || "");
+        t.tag = g.grouping || g.contentGroupDescription || "";
         t.genre = g.genre || "";
+        t.discnumber = String(g.disc || g.partOfSet || "");
         t.track = String(g.track || "");
         t.comment = typeof g.comment === "object" ? g.comment?.text || "" : g.comment || "";
+        t.bpm = String(g.bpm || g.beatsPerMinute || "");
         if (g.picture) {
           const data = new Uint8Array(g.picture.data);
           const mime = g.picture.format || "image/jpeg";
@@ -86,12 +177,14 @@ export async function readMp3(file: File): Promise<Mp3File> {
       onError: () => resolve(t),
     });
   });
+  const meta = await readAudioMeta(file, format, arrayBuffer);
   return {
     id: crypto.randomUUID(),
     file,
     arrayBuffer,
     format,
     tags,
+    meta,
     original: structuredClone({ ...tags, cover: tags.cover ? { ...tags.cover } : undefined }),
     dirty: false,
   };
@@ -109,9 +202,13 @@ export function writeTagsToBlob(m: Mp3File): Blob {
   if (t.artist) writer.setFrame("TPE1", [t.artist]);
   if (t.album) writer.setFrame("TALB", t.album);
   if (t.albumArtist) writer.setFrame("TPE2", t.albumArtist);
+  if (t.composer) writer.setFrame("TCOM", [t.composer]);
   if (t.year) writer.setFrame("TYER", parseInt(t.year, 10) || 0);
+  if (t.tag) writer.setFrame("TIT1", t.tag);
   if (t.genre) writer.setFrame("TCON", [t.genre]);
+  if (t.discnumber) writer.setFrame("TPOS", t.discnumber);
   if (t.track) writer.setFrame("TRCK", t.track);
+  if (t.bpm) writer.setFrame("TBPM", parseInt(t.bpm, 10) || 0);
   if (t.comment) writer.setFrame("COMM", { description: "", text: t.comment, language: "eng" });
   if (t.cover) {
     writer.setFrame("APIC", {
