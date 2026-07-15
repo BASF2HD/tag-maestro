@@ -29,6 +29,8 @@ import {
   dataUrlToCover,
   renameByPattern,
   emptyTags,
+  SUPPORTED_EXTS,
+  SUPPORTED_ACCEPT,
   type Mp3File,
   type Mp3Tags,
 } from "@/lib/mp3";
@@ -86,11 +88,12 @@ function TagForge() {
   }, [files, filter]);
 
   const handleAdd = useCallback(async (list: FileList | File[]) => {
-    const arr = Array.from(list).filter((f) =>
-      /\.mp3$/i.test(f.name) || f.type === "audio/mpeg",
-    );
+    const arr = Array.from(list).filter((f) => {
+      const n = f.name.toLowerCase();
+      return SUPPORTED_EXTS.some((ext) => n.endsWith(ext));
+    });
     if (!arr.length) {
-      toast.error("No MP3 files found");
+      toast.error("No supported audio files (MP3, M4A, FLAC, WAV)");
       return;
     }
     setBusy(`Reading ${arr.length} file${arr.length > 1 ? "s" : ""}…`);
@@ -98,6 +101,13 @@ function TagForge() {
       const loaded = await Promise.all(arr.map((f) => readMp3(f)));
       setFiles((prev) => [...prev, ...loaded]);
       toast.success(`Loaded ${loaded.length} file${loaded.length > 1 ? "s" : ""}`);
+      const nonMp3 = loaded.filter((f) => f.format !== "mp3").length;
+      if (nonMp3) {
+        toast.info(
+          `${nonMp3} non-MP3 file${nonMp3 > 1 ? "s" : ""}: tag writing not yet supported for M4A/FLAC/WAV — original bytes will be exported with your rename pattern.`,
+          { duration: 6000 },
+        );
+      }
     } finally {
       setBusy(null);
     }
@@ -145,13 +155,13 @@ function TagForge() {
       if (targets.length === 1) {
         const m = targets[0];
         const blob = writeTagsToBlob(m);
-        const name = renameByPattern(pattern, m.tags, m.file.name.replace(/\.mp3$/i, "")) + ".mp3";
+        const name = renamedFilename(m, pattern);
         triggerDownload(blob, name);
       } else {
         const zip = new JSZip();
         for (const m of targets) {
           const blob = writeTagsToBlob(m);
-          const name = renameByPattern(pattern, m.tags, m.file.name.replace(/\.mp3$/i, "")) + ".mp3";
+          const name = renamedFilename(m, pattern);
           zip.file(uniqueName(zip, name), blob);
         }
         const zipBlob = await zip.generateAsync({ type: "blob" });
@@ -316,7 +326,7 @@ function TagForge() {
           <div>
             <h1 className="text-sm font-semibold tracking-tight">TagForge</h1>
             <p className="text-[11px] text-muted-foreground -mt-0.5">
-              AI MP3 tag editor · in your browser
+              AI audio tag editor · MP3, M4A, FLAC, WAV
             </p>
           </div>
         </div>
@@ -327,7 +337,7 @@ function TagForge() {
           ref={fileInput}
           type="file"
           multiple
-          accept="audio/mpeg,.mp3"
+          accept={SUPPORTED_ACCEPT}
           className="hidden"
           onChange={(e) => e.target.files && handleAdd(e.target.files)}
         />
@@ -460,7 +470,8 @@ function EmptyState({ onPick }: { onPick: () => void }) {
         <div className="mx-auto mb-4 h-12 w-12 rounded-lg bg-primary/15 text-primary grid place-items-center">
           <Upload className="h-6 w-6" />
         </div>
-        <h2 className="text-lg font-semibold">Drop MP3 files here</h2>
+        <h2 className="text-lg font-semibold">Drop audio files here</h2>
+        <p className="mt-1 text-[11px] text-muted-foreground">MP3 · M4A · FLAC · WAV</p>
         <p className="mt-1 text-sm text-muted-foreground">
           Everything stays in your browser. No uploads, no accounts.
         </p>
@@ -703,6 +714,14 @@ function EditorPanel({
 function tagsToRecord(t: Mp3Tags): Record<string, string> {
   const { cover: _c, ...rest } = t;
   return rest as Record<string, string>;
+}
+
+function renamedFilename(m: Mp3File, pattern: string): string {
+  const orig = m.file.name;
+  const dot = orig.lastIndexOf(".");
+  const ext = dot > 0 ? orig.slice(dot) : ".mp3";
+  const base = dot > 0 ? orig.slice(0, dot) : orig;
+  return renameByPattern(pattern, m.tags, base) + ext;
 }
 
 function pickNonEmpty(o: Record<string, string | undefined>): Partial<Mp3Tags> {
