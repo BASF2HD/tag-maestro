@@ -1,7 +1,25 @@
-// Client-only MP3 ID3 tag utilities.
-// Reads tags with jsmediatags, writes with browser-id3-writer.
+// Client-only audio tag utilities.
+// Reads tags with jsmediatags (MP3, M4A, FLAC; best-effort WAV).
+// Writes ID3 tags for MP3 with browser-id3-writer. Other formats are
+// currently exported with the original bytes (rename + AI edits still work in-app;
+// tag-write for M4A/FLAC/WAV is not yet supported by browser libs).
 import jsmediatags from "jsmediatags/dist/jsmediatags.min.js";
 import { ID3Writer } from "browser-id3-writer";
+
+export type AudioFormat = "mp3" | "m4a" | "flac" | "wav" | "other";
+
+export function detectFormat(file: File): AudioFormat {
+  const n = file.name.toLowerCase();
+  if (n.endsWith(".mp3") || file.type === "audio/mpeg") return "mp3";
+  if (n.endsWith(".m4a") || n.endsWith(".mp4") || file.type === "audio/mp4" || file.type === "audio/x-m4a") return "m4a";
+  if (n.endsWith(".flac") || file.type === "audio/flac" || file.type === "audio/x-flac") return "flac";
+  if (n.endsWith(".wav") || file.type === "audio/wav" || file.type === "audio/wave" || file.type === "audio/x-wav") return "wav";
+  return "other";
+}
+
+export const SUPPORTED_EXTS = [".mp3", ".m4a", ".flac", ".wav"] as const;
+export const SUPPORTED_ACCEPT =
+  "audio/mpeg,audio/mp4,audio/x-m4a,audio/flac,audio/x-flac,audio/wav,audio/x-wav,.mp3,.m4a,.flac,.wav";
 
 export interface Mp3Tags {
   title: string;
@@ -19,6 +37,7 @@ export interface Mp3File {
   id: string;
   file: File;
   arrayBuffer: ArrayBuffer;
+  format: AudioFormat;
   tags: Mp3Tags;
   original: Mp3Tags;
   dirty: boolean;
@@ -43,6 +62,7 @@ function u8ToDataUrl(u8: Uint8Array, mime: string): string {
 
 export async function readMp3(file: File): Promise<Mp3File> {
   const arrayBuffer = await file.arrayBuffer();
+  const format = detectFormat(file);
   const tags = await new Promise<Mp3Tags>((resolve) => {
     const t = emptyTags();
     jsmediatags.read(file, {
@@ -70,6 +90,7 @@ export async function readMp3(file: File): Promise<Mp3File> {
     id: crypto.randomUUID(),
     file,
     arrayBuffer,
+    format,
     tags,
     original: structuredClone({ ...tags, cover: tags.cover ? { ...tags.cover } : undefined }),
     dirty: false,
@@ -77,6 +98,11 @@ export async function readMp3(file: File): Promise<Mp3File> {
 }
 
 export function writeTagsToBlob(m: Mp3File): Blob {
+  // Only MP3 gets ID3 tags written. Other formats are returned as-is so the
+  // user still gets renamed files and can apply edits in-app.
+  if (m.format !== "mp3") {
+    return new Blob([m.arrayBuffer], { type: m.file.type || "application/octet-stream" });
+  }
   const writer = new ID3Writer(m.arrayBuffer.slice(0));
   const t = m.tags;
   if (t.title) writer.setFrame("TIT2", t.title);
