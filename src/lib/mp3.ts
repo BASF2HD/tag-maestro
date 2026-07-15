@@ -1,7 +1,7 @@
 // Client-only MP3 ID3 tag utilities.
 // Reads tags with jsmediatags, writes with browser-id3-writer.
 import jsmediatags from "jsmediatags/dist/jsmediatags.min.js";
-import ID3Writer from "browser-id3-writer";
+import { ID3Writer } from "browser-id3-writer";
 
 export interface Mp3Tags {
   title: string;
