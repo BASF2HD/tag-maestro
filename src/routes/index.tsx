@@ -725,10 +725,6 @@ function pickNonEmpty(o: Record<string, string | undefined>): Partial<Mp3Tags> {
 }
 
 function triggerDownload(blob: Blob, name: string) {
-  return _triggerDownload(blob, name);
-}
-
-function _triggerDownload(blob: Blob, name: string) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
