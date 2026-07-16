@@ -1599,6 +1599,7 @@ function renamedFilename(m: Mp3File, pattern: string): string {
   const dot = orig.lastIndexOf(".");
   const ext = dot > 0 ? orig.slice(dot) : ".mp3";
   const base = dot > 0 ? orig.slice(0, dot) : orig;
+  if (m.renamedBase !== undefined) return m.renamedBase + ext;
   return renameByPattern(pattern, m.tags, base) + ext;
 }
 
