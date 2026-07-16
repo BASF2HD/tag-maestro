@@ -391,20 +391,26 @@ function TagForge() {
     const targets = selectedFiles.length ? selectedFiles : files;
     if (!targets.length) return toast.info("Select files first");
     setBusy(`AI parsing ${targets.length} filename${targets.length > 1 ? "s" : ""}…`);
+    let applied = 0;
     try {
       for (const m of targets) {
         const out = await parseFilename({ data: { filename: m.file.name } });
+        if (!out.ok) {
+          toast.error(aiErrorMessage(out));
+          return;
+        }
         setFiles((prev) =>
           prev.map((f) =>
             f.id === m.id
-              ? { ...f, tags: { ...f.tags, ...pickNonEmpty(out) }, dirty: true }
+              ? { ...f, tags: { ...f.tags, ...pickNonEmpty(out.tags) }, dirty: true }
               : f,
           ),
         );
+        applied += 1;
       }
-      toast.success("Filled from filenames");
+      toast.success(`Filled ${applied} file${applied === 1 ? "" : "s"} from filenames`);
     } catch (e: any) {
-      toast.error(e?.message || "AI failed");
+      toast.error(aiErrorMessage(e));
     } finally {
       setBusy(null);
     }
@@ -414,6 +420,7 @@ function TagForge() {
     const targets = selectedFiles.length ? selectedFiles : files;
     if (!targets.length) return toast.info("Select files first");
     setBusy(`AI identifying ${targets.length} track${targets.length > 1 ? "s" : ""}…`);
+    let applied = 0;
     try {
       for (const m of targets) {
         const out = await identify({
@@ -422,17 +429,22 @@ function TagForge() {
             current: tagsToRecord(m.tags),
           },
         });
+        if (!out.ok) {
+          toast.error(aiErrorMessage(out));
+          return;
+        }
         setFiles((prev) =>
           prev.map((f) =>
             f.id === m.id
-              ? { ...f, tags: { ...f.tags, ...pickNonEmpty(out) }, dirty: true }
+              ? { ...f, tags: { ...f.tags, ...pickNonEmpty(out.tags) }, dirty: true }
               : f,
           ),
         );
+        applied += 1;
       }
-      toast.success("Identified");
+      toast.success(`Identified ${applied} track${applied === 1 ? "" : "s"}`);
     } catch (e: any) {
-      toast.error(e?.message || "AI failed");
+      toast.error(aiErrorMessage(e));
     } finally {
       setBusy(null);
     }
@@ -442,20 +454,26 @@ function TagForge() {
     const targets = selectedFiles.length ? selectedFiles : files;
     if (!targets.length) return toast.info("Select files first");
     setBusy(`AI cleaning ${targets.length} track${targets.length > 1 ? "s" : ""}…`);
+    let applied = 0;
     try {
       for (const m of targets) {
         const out = await cleanup({ data: { tags: tagsToRecord(m.tags) } });
+        if (!out.ok) {
+          toast.error(aiErrorMessage(out));
+          return;
+        }
         setFiles((prev) =>
           prev.map((f) =>
             f.id === m.id
-              ? { ...f, tags: { ...f.tags, ...pickNonEmpty(out) }, dirty: true }
+              ? { ...f, tags: { ...f.tags, ...pickNonEmpty(out.tags) }, dirty: true }
               : f,
           ),
         );
+        applied += 1;
       }
-      toast.success("Tags cleaned");
+      toast.success(`Cleaned ${applied} track${applied === 1 ? "" : "s"}`);
     } catch (e: any) {
-      toast.error(e?.message || "AI failed");
+      toast.error(aiErrorMessage(e));
     } finally {
       setBusy(null);
     }
@@ -475,6 +493,10 @@ function TagForge() {
             genre: m.tags.genre,
           },
         });
+        if (!out.ok) {
+          toast.error(aiErrorMessage(out));
+          return;
+        }
         const cover = dataUrlToCover(out.dataUrl);
         if (cover) {
           setFiles((prev) =>
@@ -486,7 +508,7 @@ function TagForge() {
       }
       toast.success("Cover art generated");
     } catch (e: any) {
-      toast.error(e?.message || "AI failed");
+      toast.error(aiErrorMessage(e));
     } finally {
       setBusy(null);
     }
@@ -1551,7 +1573,16 @@ function renamedFilename(m: Mp3File, pattern: string): string {
   return renameByPattern(pattern, m.tags, base) + ext;
 }
 
-function pickNonEmpty(o: Record<string, string | undefined>): Partial<Mp3Tags> {
+function aiErrorMessage(e: unknown): string {
+  if (e && typeof e === "object" && "error" in e && typeof (e as { error?: unknown }).error === "string") {
+    const err = e as { error: string; status?: number; requestId?: string };
+    return err.requestId ? `${err.error} (${err.requestId})` : err.error;
+  }
+  if (e instanceof Error && e.message) return e.message;
+  return "AI failed. Please try again.";
+}
+
+function pickNonEmpty(o: Record<string, unknown>): Partial<Mp3Tags> {
   const out: Partial<Mp3Tags> = {};
   for (const [k, v] of Object.entries(o)) {
     if (typeof v === "string" && v.trim()) (out as any)[k] = v.trim();
