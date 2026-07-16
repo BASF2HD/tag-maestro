@@ -573,6 +573,12 @@ function TagForge() {
         folders={folderMap}
         onApply={handleFolderRenames}
       />
+      <BulkFieldEditDialog
+        open={bulkEditOpen}
+        onOpenChange={setBulkEditOpen}
+        files={selectedFiles.length ? selectedFiles : files}
+        onApply={handleBulkFieldEdit}
+      />
 
       {/* Header */}
       <header className="border-b border-border bg-sidebar/60 backdrop-blur px-4 py-3 flex items-center gap-3">
