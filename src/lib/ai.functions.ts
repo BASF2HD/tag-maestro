@@ -29,7 +29,6 @@ type AiFailure = {
   retryable: boolean;
 };
 type AiTagResult = { ok: true; tags: TagFields } | AiFailure;
-type AiCoverResult = { ok: true; dataUrl: string } | AiFailure;
 type GatewayJsonResult = { ok: true; data: unknown } | AiFailure;
 
 function failure(error: string, options: Partial<Omit<AiFailure, "ok" | "error">> = {}): AiFailure {
@@ -202,5 +201,5 @@ export const aiGenerateCover = createServerFn({ method: "POST" })
     const imgUrl: string | undefined =
       msg?.images?.[0]?.image_url?.url ?? msg?.images?.[0]?.url ?? undefined;
     if (!imgUrl) return failure("Lovable AI did not return an image. Try again.", { retryable: true });
-    return { dataUrl: imgUrl };
-  }) as unknown as { __resultType?: AiCoverResult };
+    return { ok: true, dataUrl: imgUrl };
+  });
