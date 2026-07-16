@@ -161,6 +161,7 @@ function TagForge() {
   const [pattern, setPattern] = useState("%artist% - %title%");
   const [filter, setFilter] = useState("");
   const [folderRenameOpen, setFolderRenameOpen] = useState(false);
+  const [bulkEditOpen, setBulkEditOpen] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const folderInput = useRef<HTMLInputElement>(null);
   const rootFolderInput = useRef<HTMLInputElement>(null);
