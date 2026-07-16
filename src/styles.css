@@ -62,6 +62,7 @@
 }
 
 :root {
+  color-scheme: dark;
   --radius: 0.375rem;
   /* Pro audio tool: near-black graphite with warm amber accent */
   --background: oklch(0.16 0.005 260);
@@ -99,6 +100,7 @@
 }
 
 .dark {
+  color-scheme: dark;
   --background: oklch(0.129 0.042 264.695);
   --foreground: oklch(0.984 0.003 247.858);
   --card: oklch(0.208 0.042 265.755);
@@ -133,6 +135,42 @@
   --sidebar-ring: oklch(0.551 0.027 264.364);
 }
 
+.light {
+  color-scheme: light;
+  --background: oklch(0.98 0.005 260);
+  --foreground: oklch(0.18 0.005 260);
+  --card: oklch(1.0 0.0 0);
+  --card-foreground: oklch(0.18 0.005 260);
+  --popover: oklch(1.0 0.0 0);
+  --popover-foreground: oklch(0.18 0.005 260);
+  --primary: oklch(0.55 0.18 250);
+  --primary-foreground: oklch(0.98 0.005 260);
+  --secondary: oklch(0.93 0.01 260);
+  --secondary-foreground: oklch(0.18 0.005 260);
+  --muted: oklch(0.95 0.005 260);
+  --muted-foreground: oklch(0.55 0.01 260);
+  --accent: oklch(0.90 0.015 260);
+  --accent-foreground: oklch(0.18 0.005 260);
+  --destructive: oklch(0.55 0.20 25);
+  --destructive-foreground: oklch(0.98 0 0);
+  --border: oklch(0.88 0.008 260);
+  --input: oklch(0.92 0.008 260);
+  --ring: oklch(0.55 0.18 250);
+  --chart-1: oklch(0.646 0.222 41.116);
+  --chart-2: oklch(0.6 0.118 184.704);
+  --chart-3: oklch(0.398 0.07 227.392);
+  --chart-4: oklch(0.828 0.189 84.429);
+  --chart-5: oklch(0.769 0.188 70.08);
+  --sidebar: oklch(0.96 0.005 260);
+  --sidebar-foreground: oklch(0.18 0.005 260);
+  --sidebar-primary: oklch(0.55 0.18 250);
+  --sidebar-primary-foreground: oklch(0.98 0.005 260);
+  --sidebar-accent: oklch(0.92 0.01 260);
+  --sidebar-accent-foreground: oklch(0.18 0.005 260);
+  --sidebar-border: oklch(0.88 0.008 260);
+  --sidebar-ring: oklch(0.55 0.18 250);
+}
+
 @layer base {
   * {
     border-color: var(--color-border);
@@ -141,5 +179,22 @@
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);
+  }
+
+  /* Beautiful modern scrollbar styling */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 5px;
+    border: 2px solid var(--background);
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--muted-foreground);
   }
 }

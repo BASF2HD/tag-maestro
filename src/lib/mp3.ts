@@ -18,6 +18,7 @@ export function detectFormat(file: File): AudioFormat {
 }
 
 export const SUPPORTED_EXTS = [".mp3", ".m4a", ".flac", ".wav"] as const;
+export const IMAGE_EXTS = [".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif"] as const;
 export const SUPPORTED_ACCEPT =
   "audio/mpeg,audio/mp4,audio/x-m4a,audio/flac,audio/x-flac,audio/wav,audio/x-wav,.mp3,.m4a,.flac,.wav";
 
@@ -52,12 +53,14 @@ export interface FileMeta {
 export interface Mp3File {
   id: string;
   file: File;
-  arrayBuffer: ArrayBuffer;
   format: AudioFormat;
   tags: Mp3Tags;
   meta: FileMeta;
   original: Mp3Tags;
   dirty: boolean;
+  folderName: string;
+  folderPath: string;
+  editedFolderName: string;
 }
 
 export const emptyTags = (): Mp3Tags => ({
@@ -103,7 +106,8 @@ function formatDuration(seconds: number): string {
 async function readAudioMeta(
   file: File,
   format: AudioFormat,
-  arrayBuffer: ArrayBuffer,
+  arrayBuffer: ArrayBuffer | null,
+  skipAudioDecode?: boolean,
 ): Promise<FileMeta> {
   const path =
     (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name;
@@ -118,6 +122,10 @@ async function readAudioMeta(
     size: formatBytes(file.size),
     modified: new Date(file.lastModified).toLocaleString(),
   };
+
+  if (skipAudioDecode || !arrayBuffer) {
+    return meta;
+  }
 
   try {
     const ctx = new AudioContext();
@@ -147,8 +155,35 @@ function u8ToDataUrl(u8: Uint8Array, mime: string): string {
   return `data:${mime};base64,${btoa(bin)}`;
 }
 
-export async function readMp3(file: File): Promise<Mp3File> {
-  const arrayBuffer = await file.arrayBuffer();
+/**
+ * Extract the immediate parent folder name from a relative path.
+ * e.g. "Music/Albums/My Album/song.mp3" → "My Album"
+ * If there is no folder part, returns "".
+ */
+export function extractFolderName(relativePath: string): string {
+  // Normalise separators
+  const parts = relativePath.replace(/\\/g, "/").split("/").filter(Boolean);
+  // parts: ["Music", "Albums", "My Album", "song.mp3"]
+  // The folder containing the file is the second-to-last part
+  if (parts.length < 2) return "";
+  return parts[parts.length - 2];
+}
+
+/**
+ * Extract the folder path (everything except the filename) from a relative path.
+ * e.g. "Music/Albums/My Album/song.mp3" → "Music/Albums/My Album"
+ */
+export function extractFolderPath(relativePath: string): string {
+  const parts = relativePath.replace(/\\/g, "/").split("/").filter(Boolean);
+  if (parts.length < 2) return "";
+  return parts.slice(0, -1).join("/");
+}
+
+export async function readMp3(
+  file: File,
+  relativePath?: string,
+  skipAudioDecode?: boolean,
+): Promise<Mp3File> {
   const format = detectFormat(file);
   const tags = await new Promise<Mp3Tags>((resolve) => {
     const t = emptyTags();
@@ -177,26 +212,42 @@ export async function readMp3(file: File): Promise<Mp3File> {
       onError: () => resolve(t),
     });
   });
-  const meta = await readAudioMeta(file, format, arrayBuffer);
+  const rp = relativePath || (file as File & { webkitRelativePath?: string }).webkitRelativePath || "";
+  const folderName = extractFolderName(rp || file.name);
+  const folderPath = extractFolderPath(rp || file.name);
+  
+  let arrayBuffer: ArrayBuffer | null = null;
+  if (!skipAudioDecode) {
+    try {
+      arrayBuffer = await file.arrayBuffer();
+    } catch {
+      // ignore
+    }
+  }
+
+  const meta = await readAudioMeta(file, format, arrayBuffer, skipAudioDecode);
   return {
     id: crypto.randomUUID(),
     file,
-    arrayBuffer,
     format,
     tags,
     meta,
     original: structuredClone({ ...tags, cover: tags.cover ? { ...tags.cover } : undefined }),
     dirty: false,
+    folderName,
+    folderPath,
+    editedFolderName: folderName,
   };
 }
 
-export function writeTagsToBlob(m: Mp3File): Blob {
+export async function writeTagsToBlob(m: Mp3File): Promise<Blob> {
+  const arrayBuffer = await m.file.arrayBuffer();
   // Only MP3 gets ID3 tags written. Other formats are returned as-is so the
   // user still gets renamed files and can apply edits in-app.
   if (m.format !== "mp3") {
-    return new Blob([m.arrayBuffer], { type: m.file.type || "application/octet-stream" });
+    return new Blob([arrayBuffer], { type: m.file.type || "application/octet-stream" });
   }
-  const writer = new ID3Writer(m.arrayBuffer.slice(0));
+  const writer = new ID3Writer(arrayBuffer);
   const t = m.tags;
   if (t.title) writer.setFrame("TIT2", t.title);
   if (t.artist) writer.setFrame("TPE1", [t.artist]);
