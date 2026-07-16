@@ -65,6 +65,9 @@ import {
   aiGenerateCover,
 } from "@/lib/ai.functions";
 import { FolderRenameDialog } from "@/components/FolderRenameDialog";
+import { BulkFieldEditDialog, type BulkFieldKey } from "@/components/BulkFieldEditDialog";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { ChevronDown } from "lucide-react";
 
 export const Route = createFileRoute("/")({
   component: TagForge,
