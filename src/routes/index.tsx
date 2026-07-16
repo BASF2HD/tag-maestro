@@ -65,6 +65,9 @@ import {
   aiGenerateCover,
 } from "@/lib/ai.functions";
 import { FolderRenameDialog } from "@/components/FolderRenameDialog";
+import { BulkFieldEditDialog, type BulkFieldKey } from "@/components/BulkFieldEditDialog";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { ChevronDown } from "lucide-react";
 
 export const Route = createFileRoute("/")({
   component: TagForge,
@@ -158,6 +161,7 @@ function TagForge() {
   const [pattern, setPattern] = useState("%artist% - %title%");
   const [filter, setFilter] = useState("");
   const [folderRenameOpen, setFolderRenameOpen] = useState(false);
+  const [bulkEditOpen, setBulkEditOpen] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const folderInput = useRef<HTMLInputElement>(null);
   const rootFolderInput = useRef<HTMLInputElement>(null);
@@ -311,6 +315,21 @@ function TagForge() {
       }),
     );
     toast.success(`Renamed ${renames.size} folder${renames.size > 1 ? "s" : ""}`);
+  }
+
+  /** Apply bulk field edits (find/replace etc.) to per-file values. */
+  function handleBulkFieldEdit(field: BulkFieldKey, changes: Map<string, string>) {
+    setFiles((prev) =>
+      prev.map((f) => {
+        const next = changes.get(f.id);
+        if (next === undefined) return f;
+        if (field === "filename") {
+          return { ...f, renamedBase: next, dirty: true };
+        }
+        return { ...f, tags: { ...f.tags, [field]: next }, dirty: true };
+      }),
+    );
+    toast.success(`Updated ${changes.size} file${changes.size > 1 ? "s" : ""}`);
   }
 
   /** Map of folder name -> array of file IDs for the rename dialog. */
@@ -554,6 +573,12 @@ function TagForge() {
         folders={folderMap}
         onApply={handleFolderRenames}
       />
+      <BulkFieldEditDialog
+        open={bulkEditOpen}
+        onOpenChange={setBulkEditOpen}
+        files={selectedFiles.length ? selectedFiles : files}
+        onApply={handleBulkFieldEdit}
+      />
 
       {/* Header */}
       <header className="border-b border-border bg-sidebar/60 backdrop-blur px-4 py-3 flex items-center gap-3">
@@ -612,6 +637,10 @@ function TagForge() {
         <Button size="sm" variant="outline" onClick={() => setFolderRenameOpen(true)} disabled={!files.length}>
           <FolderEdit className="mr-1.5 h-4 w-4" />
           Rename Folders
+        </Button>
+        <Button size="sm" variant="outline" onClick={() => setBulkEditOpen(true)} disabled={!files.length}>
+          <Wand2 className="mr-1.5 h-4 w-4" />
+          Bulk Edit
         </Button>
 
         <Separator orientation="vertical" className="h-8 mx-1" />
@@ -728,6 +757,7 @@ function TagForge() {
           <EditorPanel
             tags={panelTags}
             count={selectedFiles.length}
+            selectedFiles={selectedFiles}
             onChange={(key, value) => applyToSelected({ [key]: value })}
             onCoverPick={onCoverFile}
             onCoverClear={() => applyToSelected({ cover: undefined })}
@@ -1453,17 +1483,32 @@ function TdCell({
 function EditorPanel({
   tags,
   count,
+  selectedFiles,
   onChange,
   onCoverPick,
   onCoverClear,
 }: {
   tags: Mp3Tags;
   count: number;
+  selectedFiles: Mp3File[];
   onChange: (key: TagKey, value: string) => void;
   onCoverPick: (file: File) => void;
   onCoverClear: () => void;
 }) {
   const coverInput = useRef<HTMLInputElement>(null);
+  // Unique non-empty values per field across selected files → dropdown options.
+  const fieldOptions = useMemo(() => {
+    const map: Partial<Record<TagKey, string[]>> = {};
+    for (const f of FIELDS) {
+      const set = new Set<string>();
+      for (const m of selectedFiles) {
+        const v = m.tags[f.key];
+        if (typeof v === "string" && v.trim()) set.add(v);
+      }
+      map[f.key] = Array.from(set).sort((a, b) => a.localeCompare(b));
+    }
+    return map;
+  }, [selectedFiles]);
   return (
     <div className="flex flex-col h-full overflow-auto">
       <div className="p-4 border-b border-border">
@@ -1543,17 +1588,94 @@ function EditorPanel({
           ) : (
             <div key={f.key} className="space-y-1">
               <Label className="text-[11px] text-muted-foreground">{f.label}</Label>
-              <Input
+              <TagFieldCombo
                 disabled={count === 0}
-                value={tags[f.key] === MULTI ? "" : tags[f.key]}
-                placeholder={tags[f.key] === MULTI ? "<multiple values>" : ""}
-                onChange={(e) => onChange(f.key, e.target.value)}
-                className="h-8 text-sm"
+                value={tags[f.key]}
+                options={fieldOptions[f.key] || []}
+                onChange={(v) => onChange(f.key, v)}
               />
             </div>
           ),
         )}
       </div>
+    </div>
+  );
+}
+
+function TagFieldCombo({
+  value,
+  options,
+  onChange,
+  disabled,
+}: {
+  value: string;
+  options: string[];
+  onChange: (v: string) => void;
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const isMulti = value === MULTI;
+  return (
+    <div className="relative">
+      <Input
+        disabled={disabled}
+        value={isMulti ? "" : value}
+        placeholder={isMulti ? "<keep>" : ""}
+        onChange={(e) => onChange(e.target.value)}
+        className="h-8 text-sm pr-8"
+      />
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            disabled={disabled}
+            className="absolute right-1 top-1/2 -translate-y-1/2 h-6 w-6 grid place-items-center rounded text-muted-foreground hover:text-foreground hover:bg-accent disabled:opacity-40"
+            aria-label="Choose value"
+          >
+            <ChevronDown className="h-3.5 w-3.5" />
+          </button>
+        </PopoverTrigger>
+        <PopoverContent align="end" className="p-1 w-[260px] max-h-72 overflow-auto">
+          <button
+            type="button"
+            className="w-full text-left px-2 py-1.5 rounded text-xs italic text-muted-foreground hover:bg-accent"
+            onClick={() => {
+              onChange(MULTI);
+              setOpen(false);
+            }}
+          >
+            &lt;keep&gt;
+          </button>
+          <button
+            type="button"
+            className="w-full text-left px-2 py-1.5 rounded text-xs italic text-muted-foreground hover:bg-accent"
+            onClick={() => {
+              onChange("");
+              setOpen(false);
+            }}
+          >
+            &lt;blank&gt;
+          </button>
+          {options.length > 0 && <div className="my-1 border-t border-border/60" />}
+          {options.map((opt) => (
+            <button
+              key={opt}
+              type="button"
+              className="w-full text-left px-2 py-1.5 rounded text-xs hover:bg-accent truncate"
+              title={opt}
+              onClick={() => {
+                onChange(opt);
+                setOpen(false);
+              }}
+            >
+              {opt}
+            </button>
+          ))}
+          {options.length === 0 && (
+            <div className="px-2 py-1.5 text-[11px] text-muted-foreground italic">No values in selection</div>
+          )}
+        </PopoverContent>
+      </Popover>
     </div>
   );
 }
@@ -1570,6 +1692,7 @@ function renamedFilename(m: Mp3File, pattern: string): string {
   const dot = orig.lastIndexOf(".");
   const ext = dot > 0 ? orig.slice(dot) : ".mp3";
   const base = dot > 0 ? orig.slice(0, dot) : orig;
+  if (m.renamedBase !== undefined) return m.renamedBase + ext;
   return renameByPattern(pattern, m.tags, base) + ext;
 }
 

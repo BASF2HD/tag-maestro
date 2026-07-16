@@ -61,6 +61,8 @@ export interface Mp3File {
   folderName: string;
   folderPath: string;
   editedFolderName: string;
+  /** If set, overrides the pattern-based rename with this exact base name (no extension). */
+  renamedBase?: string;
 }
 
 export const emptyTags = (): Mp3Tags => ({
