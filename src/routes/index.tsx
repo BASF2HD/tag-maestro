@@ -757,6 +757,7 @@ function TagForge() {
           <EditorPanel
             tags={panelTags}
             count={selectedFiles.length}
+            selectedFiles={selectedFiles}
             onChange={(key, value) => applyToSelected({ [key]: value })}
             onCoverPick={onCoverFile}
             onCoverClear={() => applyToSelected({ cover: undefined })}
