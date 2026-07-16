@@ -638,6 +638,10 @@ function TagForge() {
           <FolderEdit className="mr-1.5 h-4 w-4" />
           Rename Folders
         </Button>
+        <Button size="sm" variant="outline" onClick={() => setBulkEditOpen(true)} disabled={!files.length}>
+          <Wand2 className="mr-1.5 h-4 w-4" />
+          Bulk Edit
+        </Button>
 
         <Separator orientation="vertical" className="h-8 mx-1" />
 
