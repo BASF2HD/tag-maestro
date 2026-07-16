@@ -317,6 +317,21 @@ function TagForge() {
     toast.success(`Renamed ${renames.size} folder${renames.size > 1 ? "s" : ""}`);
   }
 
+  /** Apply bulk field edits (find/replace etc.) to per-file values. */
+  function handleBulkFieldEdit(field: BulkFieldKey, changes: Map<string, string>) {
+    setFiles((prev) =>
+      prev.map((f) => {
+        const next = changes.get(f.id);
+        if (next === undefined) return f;
+        if (field === "filename") {
+          return { ...f, renamedBase: next, dirty: true };
+        }
+        return { ...f, tags: { ...f.tags, [field]: next }, dirty: true };
+      }),
+    );
+    toast.success(`Updated ${changes.size} file${changes.size > 1 ? "s" : ""}`);
+  }
+
   /** Map of folder name -> array of file IDs for the rename dialog. */
   const folderMap = useMemo(() => {
     const m = new Map<string, string[]>();
