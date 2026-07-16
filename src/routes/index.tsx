@@ -9,7 +9,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
   Music4,
   Upload,
@@ -37,14 +36,6 @@ import {
   Moon,
 } from "lucide-react";
 import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import {
   readMp3,
   writeTagsToBlob,
   dataUrlToCover,
@@ -66,11 +57,10 @@ import {
 } from "@/lib/ai.functions";
 import { FolderRenameDialog } from "@/components/FolderRenameDialog";
 import { BulkFieldEditDialog, type BulkFieldKey } from "@/components/BulkFieldEditDialog";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ChevronDown } from "lucide-react";
 
 export const Route = createFileRoute("/")({
-  component: TagForge,
+  component: TagMaestro,
 });
 
 const MULTI = "<keep>";
@@ -135,13 +125,23 @@ const DEFAULT_VISIBLE_COLUMNS = new Set(
   TABLE_COLUMNS.filter((c) => c.defaultVisible).map((c) => c.key),
 );
 
-function TagForge() {
-  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
-    if (typeof window !== 'undefined') {
-      return (localStorage.getItem('theme') as 'light' | 'dark') || 'dark';
+const EDITOR_MIN_WIDTH = 280;
+const EDITOR_MAX_WIDTH = 620;
+const EDITOR_DEFAULT_WIDTH = 340;
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function TagMaestro() {
+  const [theme, setTheme] = useState<'light' | 'dark'>('dark');
+
+  useEffect(() => {
+    const savedTheme = localStorage.getItem("theme");
+    if (savedTheme === "light" || savedTheme === "dark") {
+      setTheme(savedTheme);
     }
-    return 'dark';
-  });
+  }, []);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -162,14 +162,26 @@ function TagForge() {
   const [filter, setFilter] = useState("");
   const [folderRenameOpen, setFolderRenameOpen] = useState(false);
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
+  const [editorWidth, setEditorWidth] = useState(EDITOR_DEFAULT_WIDTH);
   const fileInput = useRef<HTMLInputElement>(null);
   const folderInput = useRef<HTMLInputElement>(null);
   const rootFolderInput = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const saved = Number(localStorage.getItem("editorWidth"));
+    if (Number.isFinite(saved)) {
+      setEditorWidth(clamp(saved, EDITOR_MIN_WIDTH, EDITOR_MAX_WIDTH));
+    }
+  }, []);
 
   const parseFilename = useServerFn(aiParseFilename);
   const identify = useServerFn(aiIdentify);
   const cleanup = useServerFn(aiCleanup);
   const genCover = useServerFn(aiGenerateCover);
+
+  useEffect(() => {
+    localStorage.setItem("editorWidth", String(editorWidth));
+  }, [editorWidth]);
 
   const selectedFiles = useMemo(
     () => files.filter((f) => selected.has(f.id)),
@@ -543,6 +555,32 @@ function TagForge() {
     reader.readAsDataURL(fileInput);
   }
 
+  function startEditorResize(e: React.PointerEvent<HTMLDivElement>) {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = editorWidth;
+
+    const onMove = (event: PointerEvent) => {
+      const maxWidth = Math.min(EDITOR_MAX_WIDTH, Math.max(EDITOR_MIN_WIDTH, window.innerWidth - 420));
+      setEditorWidth(clamp(startWidth + startX - event.clientX, EDITOR_MIN_WIDTH, maxWidth));
+    };
+    const onUp = () => {
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp, { once: true });
+  }
+
+  function adjustEditorWidth(delta: number) {
+    setEditorWidth((width) => clamp(width + delta, EDITOR_MIN_WIDTH, EDITOR_MAX_WIDTH));
+  }
+
   // ==== Panel state for the editor (multi-edit aware) ====
   const panelTags: Mp3Tags = useMemo(() => {
     if (!selectedFiles.length) return emptyTags();
@@ -562,7 +600,7 @@ function TagForge() {
 
   return (
     <div
-      className="min-h-screen bg-background text-foreground flex flex-col"
+      className="h-screen max-h-screen min-h-0 bg-background text-foreground flex flex-col overflow-hidden supports-[height:100dvh]:h-dvh supports-[height:100dvh]:max-h-dvh"
       onDragOver={(e) => e.preventDefault()}
       onDrop={onDrop}
     >
@@ -581,20 +619,17 @@ function TagForge() {
       />
 
       {/* Header */}
-      <header className="border-b border-border bg-sidebar/60 backdrop-blur px-4 py-3 flex items-center gap-3">
+      <header className="shrink-0 border-b border-border bg-sidebar/60 backdrop-blur px-3 py-2 flex items-center gap-2">
         <div className="flex items-center gap-2">
           <div className="h-8 w-8 rounded-md bg-primary text-primary-foreground grid place-items-center shadow-[0_0_0_1px_var(--border)]">
             <Music4 className="h-4 w-4" />
           </div>
           <div>
-            <h1 className="text-sm font-semibold tracking-tight">TagForge</h1>
-            <p className="text-[11px] text-muted-foreground -mt-0.5">
-              AI audio tag editor · MP3, M4A, FLAC, WAV
-            </p>
+            <h1 className="text-sm font-semibold tracking-tight">TagMaestro</h1>
           </div>
         </div>
 
-        <Separator orientation="vertical" className="h-8 mx-2" />
+        <Separator orientation="vertical" className="h-7 mx-1" />
 
         <input
           ref={fileInput}
@@ -643,7 +678,7 @@ function TagForge() {
           Bulk Edit
         </Button>
 
-        <Separator orientation="vertical" className="h-8 mx-1" />
+        <Separator orientation="vertical" className="h-7 mx-1" />
 
         <div className="hidden md:flex items-center gap-1">
           <span className="text-[11px] uppercase tracking-wider text-muted-foreground mr-1">
@@ -696,7 +731,7 @@ function TagForge() {
       </header>
 
       {/* Body */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 min-h-0 flex overflow-hidden">
         {/* File table */}
         <main className="flex-1 min-w-0 flex flex-col overflow-hidden">
           {files.length === 0 ? (
@@ -752,8 +787,42 @@ function TagForge() {
           )}
         </main>
 
+        <div
+          role="separator"
+          aria-label="Resize editor panel"
+          aria-orientation="vertical"
+          aria-valuemin={EDITOR_MIN_WIDTH}
+          aria-valuemax={EDITOR_MAX_WIDTH}
+          aria-valuenow={editorWidth}
+          tabIndex={0}
+          title="Drag to resize editor"
+          className="group relative z-20 flex w-2 shrink-0 cursor-col-resize items-stretch justify-center bg-transparent outline-none focus-visible:ring-1 focus-visible:ring-primary"
+          onPointerDown={startEditorResize}
+          onDoubleClick={() => setEditorWidth(EDITOR_DEFAULT_WIDTH)}
+          onKeyDown={(e) => {
+            if (e.key === "ArrowLeft") {
+              e.preventDefault();
+              adjustEditorWidth(e.shiftKey ? 40 : 16);
+            } else if (e.key === "ArrowRight") {
+              e.preventDefault();
+              adjustEditorWidth(e.shiftKey ? -40 : -16);
+            } else if (e.key === "Home") {
+              e.preventDefault();
+              setEditorWidth(EDITOR_MIN_WIDTH);
+            } else if (e.key === "End") {
+              e.preventDefault();
+              setEditorWidth(EDITOR_MAX_WIDTH);
+            }
+          }}
+        >
+          <span className="w-px bg-border transition-colors group-hover:bg-primary group-focus-visible:bg-primary" />
+        </div>
+
         {/* Editor panel */}
-        <aside className="w-[340px] border-l border-border bg-sidebar/40 flex flex-col overflow-hidden">
+        <aside
+          className="shrink-0 bg-sidebar/40 flex flex-col overflow-hidden"
+          style={{ width: editorWidth }}
+        >
           <EditorPanel
             tags={panelTags}
             count={selectedFiles.length}
@@ -770,21 +839,21 @@ function TagForge() {
 
 function EmptyState({ onPick }: { onPick: () => void }) {
   return (
-    <div className="flex-1 grid place-items-center p-8">
-      <div className="max-w-md text-center border border-dashed border-border rounded-xl p-12 bg-card/40">
-        <div className="mx-auto mb-4 h-12 w-12 rounded-lg bg-primary/15 text-primary grid place-items-center">
-          <Upload className="h-6 w-6" />
+    <div className="flex-1 min-h-0 grid place-items-center overflow-auto p-4">
+      <div className="w-full max-w-sm text-center border border-dashed border-border rounded-lg p-6 bg-card/40">
+        <div className="mx-auto mb-3 h-10 w-10 rounded-md bg-primary/15 text-primary grid place-items-center">
+          <Upload className="h-5 w-5" />
         </div>
-        <h2 className="text-lg font-semibold">Drop audio files here</h2>
+        <h2 className="text-base font-semibold">Drop audio files here</h2>
         <p className="mt-1 text-[11px] text-muted-foreground">MP3 · M4A · FLAC · WAV</p>
-        <p className="mt-1 text-sm text-muted-foreground">
+        <p className="mt-1 text-xs text-muted-foreground">
           Everything stays in your browser. No uploads, no accounts.
         </p>
-        <Button className="mt-5" onClick={onPick}>
+        <Button className="mt-4 h-8 text-xs" onClick={onPick}>
           <Upload className="mr-1.5 h-4 w-4" />
           Choose files
         </Button>
-        <div className="mt-6 grid grid-cols-2 gap-2 text-left text-xs text-muted-foreground">
+        <div className="mt-4 grid grid-cols-2 gap-2 text-left text-xs text-muted-foreground">
           <Feature icon={FileText} title="Auto-fill" desc="Parse tags from filenames" />
           <Feature icon={Sparkles} title="Identify" desc="Find missing metadata" />
           <Feature icon={Wand2} title="Clean up" desc="Normalize titles & artists" />
@@ -805,7 +874,7 @@ function Feature({
   desc: string;
 }) {
   return (
-    <div className="rounded-md border border-border/60 bg-background/40 p-2.5">
+    <div className="rounded-md border border-border/60 bg-background/40 p-2">
       <div className="flex items-center gap-1.5 text-foreground">
         <Icon className="h-3.5 w-3.5 text-primary" />
         <span className="text-xs font-medium">{title}</span>
@@ -1173,10 +1242,12 @@ function FileTable({
           <thead className="sticky top-0 z-10 bg-secondary/80 backdrop-blur-md text-muted-foreground border-b border-border shadow-[0_1px_2px_rgba(0,0,0,0.15)]">
             <tr className="border-b border-border bg-secondary/30">
               <th style={{ width: 36, minWidth: 36, maxWidth: 36 }} className="px-2 py-1.5 text-left">
-                <Checkbox
+                <input
+                  type="checkbox"
                   checked={allPageSelected}
-                  onCheckedChange={(v) => handleHeaderCheckboxChange(Boolean(v))}
+                  onChange={(e) => handleHeaderCheckboxChange(e.currentTarget.checked)}
                   aria-label="Select page"
+                  className="h-3.5 w-3.5 accent-primary"
                 />
               </th>
               {visible.map((col) => {
@@ -1197,7 +1268,7 @@ function FileTable({
                     onDragLeave={handleDragLeave}
                     onDrop={(e) => handleDrop(e, col.key)}
                     onDragEnd={handleDragEnd}
-                    className={`py-1.5 text-left font-semibold text-foreground/80 relative group select-none transition-all ${
+                    className={`py-1 text-left font-semibold text-foreground/80 relative group select-none transition-all ${
                       col.key !== "cover" ? "cursor-grab active:cursor-grabbing hover:bg-accent/30" : ""
                     } ${
                       isOver ? "border-l-2 border-l-primary pl-1.5 pr-2" : "px-2"
@@ -1209,12 +1280,16 @@ function FileTable({
                     <div className="flex items-center gap-1 truncate pr-3" title={col.label}>
                       <span className="truncate">{col.label}</span>
                       {col.key !== "cover" && (
-                        <span className="shrink-0 text-muted-foreground/60 group-hover:text-foreground/80 transition-colors">
+                        <span
+                          className={`shrink-0 transition-colors ${
+                            sortKey === col.key ? "text-primary opacity-100" : "text-muted-foreground/60 group-hover:text-foreground/80"
+                          }`}
+                        >
                           {sortKey === col.key ? (
                             sortOrder === "asc" ? (
-                              <ArrowUp className="h-3 w-3 text-primary" />
+                              <ArrowUp className="h-3.5 w-3.5" />
                             ) : (
-                              <ArrowDown className="h-3 w-3 text-primary" />
+                              <ArrowDown className="h-3.5 w-3.5" />
                             )
                           ) : (
                             <ArrowUpDown className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
@@ -1234,33 +1309,11 @@ function FileTable({
                 );
               })}
               <th style={{ width: 32, minWidth: 32, maxWidth: 32 }} className="px-1 py-1 text-right">
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-6 w-6 text-muted-foreground hover:text-foreground"
-                      aria-label="Toggle columns"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <MoreVertical className="h-3.5 w-3.5" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-48 max-h-80 overflow-y-auto">
-                    <DropdownMenuLabel className="text-xs">Customize…</DropdownMenuLabel>
-                    <DropdownMenuSeparator />
-                    {TABLE_COLUMNS.map((col) => (
-                      <DropdownMenuCheckboxItem
-                        key={col.key}
-                        checked={visibleColumns.has(col.key)}
-                        onCheckedChange={() => toggleColumn(col.key)}
-                        onSelect={(e) => e.preventDefault()}
-                      >
-                        {col.label}
-                      </DropdownMenuCheckboxItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                <ColumnMenu
+                  columns={TABLE_COLUMNS}
+                  visibleColumns={visibleColumns}
+                  onToggle={toggleColumn}
+                />
               </th>
             </tr>
           </thead>
@@ -1271,15 +1324,17 @@ function FileTable({
                 <tr
                   key={f.id}
                   data-selected={isSel}
-                  className="border-b border-border/60 hover:bg-accent/40 data-[selected=true]:bg-primary/10 data-[selected=true]:hover:bg-primary/15"
+                  className="h-6 border-b border-border/60 hover:bg-accent/40 data-[selected=true]:bg-primary/10 data-[selected=true]:hover:bg-primary/15"
                   onClick={(e) => onToggle(f.id, e.metaKey || e.ctrlKey || e.shiftKey)}
                 >
-                  <td style={{ width: 36, minWidth: 36, maxWidth: 36 }} className="px-2 py-1.5">
-                    <Checkbox
+                  <td style={{ width: 36, minWidth: 36, maxWidth: 36 }} className="px-2 py-0.5">
+                    <input
+                      type="checkbox"
                       checked={isSel}
-                      onCheckedChange={() => onToggle(f.id, true)}
+                      onChange={() => onToggle(f.id, true)}
                       onClick={(e) => e.stopPropagation()}
                       aria-label="Select"
+                      className="h-3.5 w-3.5 accent-primary"
                     />
                   </td>
                   {visible.map((col) => (
@@ -1291,7 +1346,7 @@ function FileTable({
                       onEditFolder={onEditFolder}
                     />
                   ))}
-                  <td style={{ width: 32, minWidth: 32, maxWidth: 32 }} className="px-1 py-1.5" />
+                  <td style={{ width: 32, minWidth: 32, maxWidth: 32 }} className="px-1 py-0.5" />
                 </tr>
               );
             })}
@@ -1387,6 +1442,77 @@ function FileTable({
   );
 }
 
+function ColumnMenu({
+  columns,
+  visibleColumns,
+  onToggle,
+}: {
+  columns: TableColumn[];
+  visibleColumns: Set<TableColumnKey>;
+  onToggle: (key: TableColumnKey) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onPointerDown(event: PointerEvent) {
+      if (!menuRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    }
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  return (
+    <div ref={menuRef} className="relative inline-flex">
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="h-6 w-6 text-muted-foreground hover:text-foreground"
+        aria-label="Toggle columns"
+        aria-expanded={open}
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((value) => !value);
+        }}
+      >
+        <MoreVertical className="h-3.5 w-3.5" />
+      </Button>
+      {open && (
+        <div className="absolute right-0 top-full z-50 mt-1 max-h-80 w-48 overflow-y-auto rounded-sm border border-border bg-white p-1 text-left text-[11px] text-black shadow-none">
+          <div className="px-1.5 py-1 font-semibold text-black">Customize...</div>
+          <div className="my-0.5 border-t border-border/60" />
+          {columns.map((col) => (
+            <label
+              key={col.key}
+              className="flex cursor-pointer items-center gap-2 rounded-sm px-1.5 py-0.5 leading-5 hover:bg-accent"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <input
+                type="checkbox"
+                checked={visibleColumns.has(col.key)}
+                onChange={() => onToggle(col.key)}
+                className="h-3 w-3 accent-primary"
+              />
+              <span className="truncate">{col.label}</span>
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TableCell({
   file,
   col,
@@ -1426,12 +1552,12 @@ function TableCell({
 
   if (col.kind === "cover") {
     return (
-      <td style={colStyle} className="px-2 py-1.5">
+      <td style={colStyle} className="px-2 py-0.5">
         {file.tags.cover?.dataUrl ? (
           <img
             src={file.tags.cover.dataUrl}
             alt=""
-            className="h-6 w-6 rounded object-cover"
+            className="h-5 w-5 rounded object-cover"
           />
         ) : null}
       </td>
@@ -1448,7 +1574,7 @@ function TableCell({
   return (
     <td
       style={colStyle}
-      className="px-2 py-1.5 text-muted-foreground truncate"
+      className="px-2 py-0.5 text-muted-foreground truncate"
       title={readOnly}
     >
       {col.kind === "filename" && file.dirty && (
@@ -1469,9 +1595,9 @@ function TdCell({
   style: React.CSSProperties;
 }) {
   return (
-    <td style={style} className="px-1 py-0.5">
+    <td style={style} className="px-1 py-px">
       <input
-        className="w-full bg-transparent px-1.5 py-1 rounded outline-none focus:bg-background focus:ring-1 focus:ring-primary truncate"
+        className="h-5 w-full truncate rounded bg-transparent px-1.5 py-0 text-[11px] leading-none outline-none focus:bg-background focus:ring-1 focus:ring-primary"
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onClick={(e) => e.stopPropagation()}
@@ -1510,12 +1636,12 @@ function EditorPanel({
     return map;
   }, [selectedFiles]);
   return (
-    <div className="flex flex-col h-full overflow-auto">
-      <div className="p-4 border-b border-border">
-        <p className="text-[11px] uppercase tracking-wider text-muted-foreground">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
+      <div className="shrink-0 border-b border-border px-3 py-2">
+        <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
           Editor
         </p>
-        <p className="text-sm font-medium mt-0.5">
+        <p className="text-xs font-medium mt-0.5">
           {count === 0
             ? "No selection"
             : count === 1
@@ -1524,7 +1650,7 @@ function EditorPanel({
         </p>
       </div>
 
-      <div className="p-4">
+      <div className="shrink-0 px-3 py-2">
         <div
           className="aspect-square rounded-md border border-border bg-background/40 grid place-items-center overflow-hidden relative group"
         >
@@ -1536,16 +1662,16 @@ function EditorPanel({
             />
           ) : (
             <div className="text-center text-muted-foreground text-xs">
-              <ImageIcon className="h-8 w-8 mx-auto mb-1 opacity-50" />
+              <ImageIcon className="h-6 w-6 mx-auto mb-1 opacity-50" />
               No cover art
             </div>
           )}
           {count > 0 && (
-            <div className="absolute inset-x-0 bottom-0 p-2 flex gap-1 bg-background/70 opacity-0 group-hover:opacity-100 transition-opacity">
+            <div className="absolute inset-x-0 bottom-0 p-1.5 flex gap-1 bg-background/75 opacity-0 group-hover:opacity-100 transition-opacity">
               <Button
                 size="sm"
                 variant="secondary"
-                className="flex-1 h-7 text-xs"
+                className="flex-1 h-6 px-2 text-[11px]"
                 onClick={() => coverInput.current?.click()}
               >
                 Upload
@@ -1554,7 +1680,7 @@ function EditorPanel({
                 <Button
                   size="sm"
                   variant="ghost"
-                  className="h-7 text-xs"
+                  className="h-6 px-2 text-[11px]"
                   onClick={onCoverClear}
                 >
                   Clear
@@ -1572,21 +1698,21 @@ function EditorPanel({
         />
       </div>
 
-      <div className="px-4 pb-4 space-y-3">
+      <div className="flex-1 min-h-0 overflow-auto px-3 pb-3 space-y-1.5">
         {FIELDS.map((f) =>
           f.key === "comment" ? (
-            <div key={f.key} className="space-y-1">
+            <div key={f.key} className="space-y-0.5">
               <Label className="text-[11px] text-muted-foreground">{f.label}</Label>
               <Textarea
                 disabled={count === 0}
                 value={tags.comment === MULTI ? "" : tags.comment}
                 placeholder={tags.comment === MULTI ? "<multiple values>" : ""}
                 onChange={(e) => onChange("comment", e.target.value)}
-                className="text-sm min-h-[70px]"
+                className="min-h-[38px] bg-white px-2 py-1 text-xs text-black shadow-none focus-visible:bg-white"
               />
             </div>
           ) : (
-            <div key={f.key} className="space-y-1">
+            <div key={f.key} className="space-y-0.5">
               <Label className="text-[11px] text-muted-foreground">{f.label}</Label>
               <TagFieldCombo
                 disabled={count === 0}
@@ -1614,31 +1740,57 @@ function TagFieldCombo({
   disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const comboRef = useRef<HTMLDivElement>(null);
   const isMulti = value === MULTI;
+
+  useEffect(() => {
+    if (!open) return;
+    function onPointerDown(event: PointerEvent) {
+      if (!comboRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    }
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
   return (
-    <div className="relative">
+    <div ref={comboRef} className="relative">
       <Input
         disabled={disabled}
         value={isMulti ? "" : value}
         placeholder={isMulti ? "<keep>" : ""}
         onChange={(e) => onChange(e.target.value)}
-        className="h-8 text-sm pr-8"
+        className="h-5 rounded-sm border-border/80 bg-white px-1.5 pr-6 text-[11px] leading-none text-black shadow-none focus-visible:bg-white"
       />
-      <Popover open={open} onOpenChange={setOpen}>
-        <PopoverTrigger asChild>
+      <button
+        type="button"
+        disabled={disabled}
+        className="absolute right-0.5 top-1/2 grid h-[18px] w-5 -translate-y-1/2 place-items-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40"
+        aria-label="Choose value"
+        aria-expanded={open}
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((value) => !value);
+        }}
+      >
+        <ChevronDown className="h-3 w-3" />
+      </button>
+      {open && (
+        <div
+          role="listbox"
+          className="absolute right-0 top-full z-50 mt-0.5 max-h-48 w-[240px] overflow-auto rounded-sm border border-border bg-white p-0.5 text-[11px] text-black shadow-none"
+        >
           <button
             type="button"
-            disabled={disabled}
-            className="absolute right-1 top-1/2 -translate-y-1/2 h-6 w-6 grid place-items-center rounded text-muted-foreground hover:text-foreground hover:bg-accent disabled:opacity-40"
-            aria-label="Choose value"
-          >
-            <ChevronDown className="h-3.5 w-3.5" />
-          </button>
-        </PopoverTrigger>
-        <PopoverContent align="end" className="p-1 w-[260px] max-h-72 overflow-auto">
-          <button
-            type="button"
-            className="w-full text-left px-2 py-1.5 rounded text-xs italic text-muted-foreground hover:bg-accent"
+            className="w-full rounded-sm px-1.5 py-0.5 text-left text-[11px] leading-5 italic text-muted-foreground hover:bg-accent"
             onClick={() => {
               onChange(MULTI);
               setOpen(false);
@@ -1648,7 +1800,7 @@ function TagFieldCombo({
           </button>
           <button
             type="button"
-            className="w-full text-left px-2 py-1.5 rounded text-xs italic text-muted-foreground hover:bg-accent"
+            className="w-full rounded-sm px-1.5 py-0.5 text-left text-[11px] leading-5 italic text-muted-foreground hover:bg-accent"
             onClick={() => {
               onChange("");
               setOpen(false);
@@ -1656,12 +1808,12 @@ function TagFieldCombo({
           >
             &lt;blank&gt;
           </button>
-          {options.length > 0 && <div className="my-1 border-t border-border/60" />}
+          {options.length > 0 && <div className="my-0.5 border-t border-border/60" />}
           {options.map((opt) => (
             <button
               key={opt}
               type="button"
-              className="w-full text-left px-2 py-1.5 rounded text-xs hover:bg-accent truncate"
+              className="w-full truncate rounded-sm px-1.5 py-0.5 text-left text-[11px] leading-5 hover:bg-accent"
               title={opt}
               onClick={() => {
                 onChange(opt);
@@ -1672,10 +1824,10 @@ function TagFieldCombo({
             </button>
           ))}
           {options.length === 0 && (
-            <div className="px-2 py-1.5 text-[11px] text-muted-foreground italic">No values in selection</div>
+            <div className="px-1.5 py-1 text-[11px] italic text-muted-foreground">No values in selection</div>
           )}
-        </PopoverContent>
-      </Popover>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,12 +1,19 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
-const GATEWAY = "https://ai.gateway.lovable.dev/v1";
+const TEXT_MODEL = process.env.AI_TEXT_MODEL || "google/gemini-2.5-flash";
+const IMAGE_MODEL = process.env.AI_IMAGE_MODEL || "google/gemini-2.5-flash-image";
 
 function gatewayHeaders() {
-  const key = process.env.LOVABLE_API_KEY;
+  const key = process.env.AI_GATEWAY_API_KEY;
   if (!key) return null;
-  return { "Lovable-API-Key": key, "Content-Type": "application/json" };
+  return { Authorization: `Bearer ${key}`, "Content-Type": "application/json" };
+}
+
+function gatewayUrl(path: string) {
+  const base = process.env.AI_GATEWAY_URL?.replace(/\/+$/, "");
+  if (!base) return null;
+  return `${base}${path}`;
 }
 
 const TagShape = z.object({
@@ -53,7 +60,7 @@ async function gatewayFailure(res: Response, label = "AI gateway"): Promise<AiFa
 
   if (!res.ok) {
     if (res.status === 429) {
-      return failure("Lovable AI is rate-limited right now. Try again shortly or process fewer files at once.", {
+      return failure("AI is rate-limited right now. Try again shortly or process fewer files at once.", {
         status: res.status,
         requestId,
         retryable: true,
@@ -76,15 +83,16 @@ async function gatewayFailure(res: Response, label = "AI gateway"): Promise<AiFa
 
 async function chatJson(system: string, user: string): Promise<GatewayJsonResult> {
   const headers = gatewayHeaders();
-  if (!headers) return failure("Lovable AI is not configured for this project.");
+  const url = gatewayUrl("/chat/completions");
+  if (!headers || !url) return failure("AI is not configured for this project.");
 
   let res: Response;
   try {
-    res = await fetch(`${GATEWAY}/chat/completions`, {
+    res = await fetch(url, {
       method: "POST",
       headers,
       body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
+        model: TEXT_MODEL,
         messages: [
           { role: "system", content: system },
           { role: "user", content: user },
@@ -93,7 +101,7 @@ async function chatJson(system: string, user: string): Promise<GatewayJsonResult
       }),
     });
   } catch {
-    return failure("Could not reach Lovable AI. Check your connection and try again.", {
+    return failure("Could not reach AI. Check your connection and try again.", {
       retryable: true,
     });
   }
@@ -110,7 +118,7 @@ async function chatJson(system: string, user: string): Promise<GatewayJsonResult
 
 function parseTags(data: unknown): AiTagResult {
   const parsed = TagShape.safeParse(data);
-  if (!parsed.success) return failure("Lovable AI returned tags in an unexpected format.");
+  if (!parsed.success) return failure("AI returned tags in an unexpected format.");
   return { ok: true, tags: parsed.data };
 }
 
@@ -175,22 +183,23 @@ export const aiGenerateCover = createServerFn({ method: "POST" })
   )
   .handler(async ({ data }) => {
     const headers = gatewayHeaders();
-    if (!headers) return failure("Lovable AI is not configured for this project.");
+    const url = gatewayUrl("/images/generations");
+    if (!headers || !url) return failure("AI is not configured for this project.");
 
     const prompt = `Album cover art, square, no text, professional music album artwork. Artist: ${data.artist || "unknown"}. Album: ${data.album || data.title || "single"}. Genre: ${data.genre || "any"}. Mood: ${data.mood || "fitting the title"}.`;
     let res: Response;
     try {
-      res = await fetch(`${GATEWAY}/images/generations`, {
+      res = await fetch(url, {
         method: "POST",
         headers,
         body: JSON.stringify({
-          model: "google/gemini-2.5-flash-image",
+          model: IMAGE_MODEL,
           messages: [{ role: "user", content: prompt }],
           modalities: ["image", "text"],
         }),
       });
     } catch {
-      return failure("Could not reach Lovable AI. Check your connection and try again.", {
+      return failure("Could not reach AI. Check your connection and try again.", {
         retryable: true,
       });
     }
@@ -200,6 +209,6 @@ export const aiGenerateCover = createServerFn({ method: "POST" })
     const msg = data2.choices?.[0]?.message;
     const imgUrl: string | undefined =
       msg?.images?.[0]?.image_url?.url ?? msg?.images?.[0]?.url ?? undefined;
-    if (!imgUrl) return failure("Lovable AI did not return an image. Try again.", { retryable: true });
+    if (!imgUrl) return failure("AI did not return an image. Try again.", { retryable: true });
     return { ok: true, dataUrl: imgUrl };
   });

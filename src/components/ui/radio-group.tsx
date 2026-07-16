@@ -1,36 +1,52 @@
 import * as React from "react";
-import * as RadioGroupPrimitive from "@radix-ui/react-radio-group";
-import { Circle } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
-const RadioGroup = React.forwardRef<
-  React.ElementRef<typeof RadioGroupPrimitive.Root>,
-  React.ComponentPropsWithoutRef<typeof RadioGroupPrimitive.Root>
->(({ className, ...props }, ref) => {
-  return <RadioGroupPrimitive.Root className={cn("grid gap-2", className)} {...props} ref={ref} />;
+type RadioContextValue = {
+  value?: string;
+  onValueChange?: (value: string) => void;
+  name: string;
+};
+
+const RadioContext = React.createContext<RadioContextValue>({
+  name: "radio-group",
 });
-RadioGroup.displayName = RadioGroupPrimitive.Root.displayName;
+
+function RadioGroup({
+  value,
+  onValueChange,
+  className,
+  ...props
+}: React.HTMLAttributes<HTMLDivElement> & {
+  value?: string;
+  onValueChange?: (value: string) => void;
+}) {
+  const name = React.useId();
+  return (
+    <RadioContext.Provider value={{ value, onValueChange, name }}>
+      <div className={cn("grid gap-2", className)} {...props} />
+    </RadioContext.Provider>
+  );
+}
 
 const RadioGroupItem = React.forwardRef<
-  React.ElementRef<typeof RadioGroupPrimitive.Item>,
-  React.ComponentPropsWithoutRef<typeof RadioGroupPrimitive.Item>
->(({ className, ...props }, ref) => {
+  HTMLInputElement,
+  Omit<React.InputHTMLAttributes<HTMLInputElement>, "type"> & { value: string }
+>(({ className, value, ...props }, ref) => {
+  const ctx = React.useContext(RadioContext);
   return (
-    <RadioGroupPrimitive.Item
+    <input
       ref={ref}
-      className={cn(
-        "aspect-square h-4 w-4 rounded-full border border-primary text-primary shadow cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
-        className,
-      )}
+      type="radio"
+      name={ctx.name}
+      value={value}
+      checked={ctx.value === value}
+      onChange={() => ctx.onValueChange?.(value)}
+      className={cn("h-3.5 w-3.5 accent-primary", className)}
       {...props}
-    >
-      <RadioGroupPrimitive.Indicator className="flex items-center justify-center">
-        <Circle className="h-3.5 w-3.5 fill-primary" />
-      </RadioGroupPrimitive.Indicator>
-    </RadioGroupPrimitive.Item>
+    />
   );
 });
-RadioGroupItem.displayName = RadioGroupPrimitive.Item.displayName;
+RadioGroupItem.displayName = "RadioGroupItem";
 
 export { RadioGroup, RadioGroupItem };

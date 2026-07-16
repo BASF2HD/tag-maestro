@@ -9,18 +9,10 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   Wand2,
   Search,
@@ -243,23 +235,24 @@ export function BulkFieldEditDialog({
 
         <div className="p-4 border-b border-border flex items-center gap-3 bg-sidebar/10">
           <Label className="text-xs text-muted-foreground">Target field</Label>
-          <Select value={field} onValueChange={(v) => setField(v as BulkFieldKey)}>
-            <SelectTrigger className="h-8 text-xs w-48">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {FIELD_OPTIONS.map((o) => (
-                <SelectItem key={o.key} value={o.key} className="text-xs">
-                  {o.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <select
+            value={field}
+            onChange={(e) => setField(e.currentTarget.value as BulkFieldKey)}
+            className="h-8 w-48 rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none focus:ring-1 focus:ring-primary"
+          >
+            {FIELD_OPTIONS.map((o) => (
+              <option key={o.key} value={o.key}>
+                {o.label}
+              </option>
+            ))}
+          </select>
           <div className="ml-auto flex items-center gap-2">
             <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
-              <Checkbox
+              <input
+                type="checkbox"
                 checked={selectedIds.size === files.length && files.length > 0}
-                onCheckedChange={(v) => toggleAll(!!v)}
+                onChange={(e) => toggleAll(e.currentTarget.checked)}
+                className="h-3.5 w-3.5 accent-primary"
               />
               <span>
                 Apply to {selectedIds.size} of {files.length} files
@@ -301,11 +294,11 @@ export function BulkFieldEditDialog({
                 </div>
                 <div className="flex gap-4 items-center pt-1">
                   <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
-                    <Checkbox checked={useRegex} onCheckedChange={(v) => setUseRegex(!!v)} />
+                    <input type="checkbox" checked={useRegex} onChange={(e) => setUseRegex(e.currentTarget.checked)} className="h-3.5 w-3.5 accent-primary" />
                     <span>Use Regular Expressions</span>
                   </label>
                   <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
-                    <Checkbox checked={caseSensitive} onCheckedChange={(v) => setCaseSensitive(!!v)} />
+                    <input type="checkbox" checked={caseSensitive} onChange={(e) => setCaseSensitive(e.currentTarget.checked)} className="h-3.5 w-3.5 accent-primary" />
                     <span>Case Sensitive</span>
                   </label>
                 </div>
@@ -366,21 +359,21 @@ export function BulkFieldEditDialog({
 
               <TabsContent value="trim" className="mt-0 space-y-2">
                 <label className="flex items-center gap-2 p-2 rounded border border-border bg-card hover:bg-accent/40 cursor-pointer">
-                  <Checkbox checked={trimSpaces} onCheckedChange={(v) => setTrimSpaces(!!v)} />
+                  <input type="checkbox" checked={trimSpaces} onChange={(e) => setTrimSpaces(e.currentTarget.checked)} className="h-3.5 w-3.5 accent-primary" />
                   <div className="text-left">
                     <p className="text-xs font-medium">Trim Whitespace</p>
                     <p className="text-[10px] text-muted-foreground">Remove leading and trailing spaces.</p>
                   </div>
                 </label>
                 <label className="flex items-center gap-2 p-2 rounded border border-border bg-card hover:bg-accent/40 cursor-pointer">
-                  <Checkbox checked={collapseSpaces} onCheckedChange={(v) => setCollapseSpaces(!!v)} />
+                  <input type="checkbox" checked={collapseSpaces} onChange={(e) => setCollapseSpaces(e.currentTarget.checked)} className="h-3.5 w-3.5 accent-primary" />
                   <div className="text-left">
                     <p className="text-xs font-medium">Collapse Multiple Spaces</p>
                     <p className="text-[10px] text-muted-foreground">Replace runs of whitespace with a single space.</p>
                   </div>
                 </label>
                 <label className="flex items-center gap-2 p-2 rounded border border-border bg-card hover:bg-accent/40 cursor-pointer">
-                  <Checkbox checked={removeSpecial} onCheckedChange={(v) => setRemoveSpecial(!!v)} />
+                  <input type="checkbox" checked={removeSpecial} onChange={(e) => setRemoveSpecial(e.currentTarget.checked)} className="h-3.5 w-3.5 accent-primary" />
                   <div className="text-left">
                     <p className="text-xs font-medium">Remove Invalid Path Characters</p>
                     <p className="text-[10px] text-muted-foreground">Strip \ / : * ? &quot; &lt; &gt; |</p>

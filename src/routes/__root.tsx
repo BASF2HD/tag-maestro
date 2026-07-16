@@ -7,10 +7,9 @@ import {
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
-import { useEffect, type ReactNode } from "react";
+import { type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
-import { reportLovableError } from "../lib/lovable-error-reporting";
 
 function NotFoundComponent() {
   return (
@@ -37,9 +36,6 @@ function NotFoundComponent() {
 function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
   console.error(error);
   const router = useRouter();
-  useEffect(() => {
-    reportLovableError(error, { boundary: "tanstack_root_error_component" });
-  }, [error]);
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
@@ -77,14 +73,14 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "TagForge — AI MP3 Tag Editor" },
+      { title: "TagMaestro — AI MP3 Tag Editor" },
       {
         name: "description",
         content:
           "Edit ID3 tags on your MP3 files in the browser. Batch rename, auto-fill from filenames, identify songs, clean up messy tags, and generate album covers with AI.",
       },
-      { name: "author", content: "TagForge" },
-      { property: "og:title", content: "TagForge — AI MP3 Tag Editor" },
+      { name: "author", content: "TagMaestro" },
+      { property: "og:title", content: "TagMaestro — AI MP3 Tag Editor" },
       {
         property: "og:description",
         content:

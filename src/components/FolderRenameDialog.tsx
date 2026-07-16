@@ -9,7 +9,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
@@ -271,10 +270,12 @@ export function FolderRenameDialog({
                       onClick={() => handleToggleFolder(name)}
                       className="flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer hover:bg-accent/40 text-xs text-foreground"
                     >
-                      <Checkbox
+                      <input
+                        type="checkbox"
                         checked={isChecked}
-                        onCheckedChange={() => {}} // toggled by div click
-                        className="pointer-events-none"
+                        readOnly
+                        tabIndex={-1}
+                        className="pointer-events-none h-3.5 w-3.5 accent-primary"
                       />
                       <span className="truncate flex-1" title={name}>
                         {name || <span className="italic text-muted-foreground">&lt;Empty&gt;</span>}
@@ -342,11 +343,11 @@ export function FolderRenameDialog({
                     </div>
                     <div className="flex gap-4 items-center pt-1">
                       <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
-                        <Checkbox checked={useRegex} onCheckedChange={(v) => setUseRegex(!!v)} />
+                        <input type="checkbox" checked={useRegex} onChange={(e) => setUseRegex(e.currentTarget.checked)} className="h-3.5 w-3.5 accent-primary" />
                         <span>Use Regular Expressions</span>
                       </label>
                       <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
-                        <Checkbox checked={caseSensitive} onCheckedChange={(v) => setCaseSensitive(!!v)} />
+                        <input type="checkbox" checked={caseSensitive} onChange={(e) => setCaseSensitive(e.currentTarget.checked)} className="h-3.5 w-3.5 accent-primary" />
                         <span>Case Sensitive</span>
                       </label>
                     </div>
@@ -456,21 +457,21 @@ export function FolderRenameDialog({
 
                   <TabsContent value="trim" className="mt-0 space-y-2">
                     <label className="flex items-center gap-2 p-2 rounded border border-border bg-card hover:bg-accent/40 cursor-pointer">
-                      <Checkbox checked={trimSpaces} onCheckedChange={(v) => setTrimSpaces(!!v)} />
+                      <input type="checkbox" checked={trimSpaces} onChange={(e) => setTrimSpaces(e.currentTarget.checked)} className="h-3.5 w-3.5 accent-primary" />
                       <div className="text-left">
                         <p className="text-xs font-medium">Trim Whitespace</p>
                         <p className="text-[10px] text-muted-foreground">Remove spaces from the beginning and end.</p>
                       </div>
                     </label>
                     <label className="flex items-center gap-2 p-2 rounded border border-border bg-card hover:bg-accent/40 cursor-pointer">
-                      <Checkbox checked={collapseSpaces} onCheckedChange={(v) => setCollapseSpaces(!!v)} />
+                      <input type="checkbox" checked={collapseSpaces} onChange={(e) => setCollapseSpaces(e.currentTarget.checked)} className="h-3.5 w-3.5 accent-primary" />
                       <div className="text-left">
                         <p className="text-xs font-medium">Collapse Multiple Spaces</p>
                         <p className="text-[10px] text-muted-foreground">Replace multiple consecutive spaces with a single space.</p>
                       </div>
                     </label>
                     <label className="flex items-center gap-2 p-2 rounded border border-border bg-card hover:bg-accent/40 cursor-pointer">
-                      <Checkbox checked={removeSpecial} onCheckedChange={(v) => setRemoveSpecial(!!v)} />
+                      <input type="checkbox" checked={removeSpecial} onChange={(e) => setRemoveSpecial(e.currentTarget.checked)} className="h-3.5 w-3.5 accent-primary" />
                       <div className="text-left">
                         <p className="text-xs font-medium">Remove Invalid Path Characters</p>
                         <p className="text-[10px] text-muted-foreground">Remove invalid folder characters (e.g. \ / : * ? &quot; &lt; &gt; |).</p>
