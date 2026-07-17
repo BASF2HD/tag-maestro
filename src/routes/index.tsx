@@ -1270,34 +1270,24 @@ function FileTable({
     };
   }, [rowMenu]);
 
-  // High performance resize handler using CSS variables + rAF throttling
+  // Direct DOM writes make column resizing feel crisp and attached to the pointer.
   function handleResizeStart(key: TableColumnKey, startEvent: React.MouseEvent) {
     startEvent.preventDefault();
     startEvent.stopPropagation();
     const startX = startEvent.clientX;
     const startWidth = columnWidths[key] || defaultWidths[key] || 150;
     let lastWidth = startWidth;
-    let rafId = 0;
 
     function handleMouseMove(moveEvent: MouseEvent) {
       const deltaX = moveEvent.clientX - startX;
       const newWidth = Math.max(40, startWidth + deltaX);
       lastWidth = newWidth;
-      // Throttle DOM writes to one per animation frame
-      if (!rafId) {
-        rafId = requestAnimationFrame(() => {
-          if (containerRef.current) {
-            containerRef.current.style.setProperty(`--col-width-${key}`, `${newWidth}px`);
-          }
-          rafId = 0;
-        });
-      }
+      containerRef.current?.style.setProperty(`--col-width-${key}`, `${newWidth}px`);
     }
 
     function handleMouseUp() {
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
-      if (rafId) cancelAnimationFrame(rafId);
       // Persist the final width to React state
       setColumnWidths((prev) => ({
         ...prev,
@@ -1379,15 +1369,15 @@ function FileTable({
       {/* Table container */}
       <div className="flex-1 overflow-auto bg-white text-slate-950">
         <table className="w-full border-collapse table-fixed bg-white text-xs text-slate-950">
-          <thead className="sticky top-0 z-10 border-b border-slate-300 bg-[#f3f4f6] text-slate-700">
-            <tr className="border-b border-slate-300 bg-[#f3f4f6]">
-              <th style={{ width: 36, minWidth: 36, maxWidth: 36 }} className="px-2 py-0.5 text-left">
+          <thead className="sticky top-0 z-10 border-b border-slate-300 bg-[#f3f4f6] text-[11px] leading-none text-slate-700">
+            <tr className="h-[19px] border-b border-slate-300 bg-[#f3f4f6]">
+              <th style={{ width: 36, minWidth: 36, maxWidth: 36 }} className="h-[19px] px-2 py-0 text-left">
                 <input
                   type="checkbox"
                   checked={allPageSelected}
                   onChange={(e) => handleHeaderCheckboxChange(e.currentTarget.checked)}
                   aria-label="Select page"
-                  className="h-3 w-3 accent-primary"
+                  className="h-[11px] w-[11px] accent-primary"
                 />
               </th>
               {visible.map((col) => {
@@ -1408,7 +1398,7 @@ function FileTable({
                     onDragLeave={handleDragLeave}
                     onDrop={(e) => handleDrop(e, col.key)}
                     onDragEnd={handleDragEnd}
-                    className={`relative group select-none py-0.5 text-left font-semibold text-slate-700 transition-all ${
+                    className={`relative group h-[19px] select-none py-0 text-left font-semibold text-slate-700 ${
                       col.key !== "cover" ? "cursor-grab active:cursor-grabbing hover:bg-slate-200/70" : ""
                     } ${
                       isOver ? "border-l-2 border-l-primary pl-1.5 pr-2" : "px-2"
@@ -1417,7 +1407,7 @@ function FileTable({
                     } ${col.className ?? ""}`}
                     onClick={() => handleSort(col.key)}
                   >
-                    <div className="flex items-center gap-1 truncate pr-3" title={col.label}>
+                    <div className="flex h-[18px] items-center gap-1 truncate pr-3" title={col.label}>
                       <span className="truncate">{col.label}</span>
                       {col.key !== "cover" && (
                         <span
@@ -1427,9 +1417,9 @@ function FileTable({
                         >
                           {sortKey === col.key ? (
                             sortOrder === "asc" ? (
-                              <ArrowUp className="h-3.5 w-3.5" />
+                              <ArrowUp className="h-3 w-3" />
                             ) : (
-                              <ArrowDown className="h-3.5 w-3.5" />
+                              <ArrowDown className="h-3 w-3" />
                             )
                           ) : (
                             <ArrowUpDown className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
@@ -1443,12 +1433,12 @@ function FileTable({
                       onClick={(e) => e.stopPropagation()}
                       className="absolute right-0 top-0 bottom-0 w-3 -mr-1.5 cursor-col-resize z-20 flex items-center justify-center"
                     >
-                      <div className="h-full w-0.5 rounded-full bg-slate-300 transition-all group-hover:w-1 group-hover:bg-primary/60" />
+                      <div className="h-full w-0.5 rounded-full bg-slate-300 group-hover:bg-primary/60" />
                     </div>
                   </th>
                 );
               })}
-              <th style={{ width: 32, minWidth: 32, maxWidth: 32 }} className="px-1 py-0.5 text-right">
+              <th style={{ width: 32, minWidth: 32, maxWidth: 32 }} className="h-[19px] px-1 py-0 text-right">
                 <ColumnMenu
                   columns={TABLE_COLUMNS}
                   visibleColumns={visibleColumns}
@@ -1725,7 +1715,7 @@ function ColumnMenu({
         type="button"
         variant="ghost"
         size="icon"
-        className="h-6 w-6 text-muted-foreground hover:text-foreground"
+        className="h-[18px] w-6 text-muted-foreground hover:text-foreground"
         aria-label="Toggle columns"
         aria-expanded={open}
         onClick={(e) => {
@@ -1733,7 +1723,7 @@ function ColumnMenu({
           setOpen((value) => !value);
         }}
       >
-        <MoreVertical className="h-3.5 w-3.5" />
+        <MoreVertical className="h-3 w-3" />
       </Button>
       {open && (
         <div className="absolute right-0 top-full z-50 mt-1 max-h-80 w-48 overflow-y-auto rounded-sm border border-border bg-popover p-1 text-left text-[11px] text-popover-foreground shadow-none">
