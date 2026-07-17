@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   Music4,
   Upload,
@@ -76,6 +77,13 @@ type TableColumn = {
   kind: ColumnKind;
   className?: string;
   defaultVisible?: boolean;
+};
+
+type ImportProgress = {
+  title: string;
+  message: string;
+  loaded?: number;
+  total?: number;
 };
 
 const FIELDS: { key: TagKey; label: string }[] = [
@@ -176,6 +184,7 @@ function TagMaestro() {
   const [files, setFiles] = useState<Mp3File[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState<string | null>(null);
+  const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
   const [pattern, setPattern] = useState("%artist% - %title%");
   const [filter, setFilter] = useState("");
   const [folderRenameOpen, setFolderRenameOpen] = useState(false);
@@ -245,6 +254,14 @@ function TagMaestro() {
 
   /** Handle adding files from a folder picker (single folder or root with subfolders). */
   const handleAddFolder = useCallback(async (list: FileList | File[]) => {
+    const pickedCount = list.length;
+    setBusy(`Scanning selected folder…`);
+    setImportProgress({
+      title: "Scanning folder",
+      message: `Checking ${pickedCount} selected item${pickedCount === 1 ? "" : "s"} for supported audio files…`,
+    });
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+
     const allFiles = Array.from(list);
     // Separate audio files and image files
     const audioFiles = allFiles.filter((f) => {
@@ -256,6 +273,8 @@ function TagMaestro() {
       return IMAGE_EXTS.some((ext) => n.endsWith(ext));
     });
     if (!audioFiles.length) {
+      setImportProgress(null);
+      setBusy(null);
       toast.error("No supported audio files found in folder");
       return;
     }
@@ -281,6 +300,12 @@ function TagMaestro() {
     const total = audioFiles.length;
     let loadedCount = 0;
     setBusy(`Reading files… 0/${total}`);
+    setImportProgress({
+      title: "Reading audio tags",
+      message: `Found ${total} supported audio file${total === 1 ? "" : "s"}. Loading metadata now…`,
+      loaded: 0,
+      total,
+    });
     try {
       for (let i = 0; i < total; i += BATCH) {
         const batch = audioFiles.slice(i, i + BATCH);
@@ -317,10 +342,17 @@ function TagMaestro() {
         setFiles((prev) => [...prev, ...loaded]);
         loadedCount += loaded.length;
         setBusy(`Reading files… ${loadedCount}/${total}`);
+        setImportProgress({
+          title: "Reading audio tags",
+          message: "Loading files into the table…",
+          loaded: loadedCount,
+          total,
+        });
       }
       toast.success(`Loaded ${loadedCount} file${loadedCount > 1 ? "s" : ""} from folder`);
     } finally {
       setBusy(null);
+      setImportProgress(null);
     }
   }, []);
 
@@ -635,6 +667,7 @@ function TagMaestro() {
         files={selectedFiles.length ? selectedFiles : files}
         onApply={handleBulkFieldEdit}
       />
+      <ImportProgressDialog progress={importProgress} />
 
       {/* Header */}
       <header className="shrink-0 border-b border-border bg-sidebar/60 backdrop-blur px-3 py-2 flex items-center gap-2">
@@ -853,6 +886,40 @@ function TagMaestro() {
         </aside>
       </div>
     </div>
+  );
+}
+
+function ImportProgressDialog({ progress }: { progress: ImportProgress | null }) {
+  const hasProgress = typeof progress?.loaded === "number" && typeof progress.total === "number";
+  const percent = hasProgress && progress.total ? Math.round((progress.loaded! / progress.total) * 100) : 0;
+
+  return (
+    <Dialog open={Boolean(progress)}>
+      <DialogContent className="max-w-sm rounded-md p-4 shadow-none">
+        <DialogHeader className="space-y-1 text-left">
+          <DialogTitle className="flex items-center gap-2 text-sm">
+            <Loader2 className="h-4 w-4 animate-spin text-primary" />
+            {progress?.title || "Loading folder"}
+          </DialogTitle>
+        </DialogHeader>
+        <div className="mt-3 space-y-2">
+          <p className="text-xs text-muted-foreground">{progress?.message}</p>
+          {hasProgress && (
+            <>
+              <div className="h-1.5 overflow-hidden rounded-sm bg-muted">
+                <div
+                  className="h-full bg-primary transition-[width]"
+                  style={{ width: `${percent}%` }}
+                />
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                {progress.loaded} of {progress.total} files
+              </p>
+            </>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
