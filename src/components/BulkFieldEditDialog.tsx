@@ -21,7 +21,7 @@ import {
   Scissors,
   CaseSensitive,
   Sparkles,
-} from "lucide-react";
+} from "@/components/icons";
 import type { Mp3File, Mp3Tags } from "@/lib/mp3";
 
 export type BulkFieldKey =

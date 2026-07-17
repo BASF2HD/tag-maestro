@@ -2,8 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import JSZip from "jszip";
-import { toast } from "sonner";
-import { Toaster } from "@/components/ui/sonner";
+import { Toaster, toast } from "@/components/ui/sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -34,7 +33,8 @@ import {
   ArrowUpDown,
   Sun,
   Moon,
-} from "lucide-react";
+  ChevronDown,
+} from "@/components/icons";
 import {
   readMp3,
   writeTagsToBlob,
@@ -57,7 +57,6 @@ import {
 } from "@/lib/ai.functions";
 import { FolderRenameDialog } from "@/components/FolderRenameDialog";
 import { BulkFieldEditDialog, type BulkFieldKey } from "@/components/BulkFieldEditDialog";
-import { ChevronDown } from "lucide-react";
 
 export const Route = createFileRoute("/")({
   component: TagMaestro,
@@ -604,7 +603,7 @@ function TagMaestro() {
       onDragOver={(e) => e.preventDefault()}
       onDrop={onDrop}
     >
-      <Toaster theme="dark" position="top-right" />
+      <Toaster />
       <FolderRenameDialog
         open={folderRenameOpen}
         onOpenChange={setFolderRenameOpen}
@@ -1204,7 +1203,7 @@ function FileTable({
     >
       {/* Gmail-style select-all banner */}
       {allPageSelected && files.length > pageSize && (
-        <div className="bg-primary/10 border-b border-border/80 px-4 py-1.5 text-xs text-center flex items-center justify-center gap-1.5 animate-in fade-in slide-in-from-top-1 duration-200">
+        <div className="bg-primary/10 border-b border-border/80 px-4 py-1.5 text-xs text-center flex items-center justify-center gap-1.5">
           {!allFilteredSelected ? (
             <>
               <span className="text-muted-foreground">

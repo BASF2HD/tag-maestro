@@ -24,7 +24,7 @@ import {
   Scissors,
   CaseSensitive,
   Sparkles,
-} from "lucide-react";
+} from "@/components/icons";
 
 export interface FolderRenameDialogProps {
   open: boolean;

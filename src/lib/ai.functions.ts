@@ -1,5 +1,4 @@
 import { createServerFn } from "@tanstack/react-start";
-import { z } from "zod";
 
 const TEXT_MODEL = process.env.AI_TEXT_MODEL || "google/gemini-2.5-flash";
 const IMAGE_MODEL = process.env.AI_IMAGE_MODEL || "google/gemini-2.5-flash-image";
@@ -16,18 +15,9 @@ function gatewayUrl(path: string) {
   return `${base}${path}`;
 }
 
-const TagShape = z.object({
-  title: z.string().optional(),
-  artist: z.string().optional(),
-  album: z.string().optional(),
-  albumArtist: z.string().optional(),
-  year: z.string().optional(),
-  genre: z.string().optional(),
-  track: z.string().optional(),
-  comment: z.string().optional(),
-});
+const TAG_KEYS = ["title", "artist", "album", "albumArtist", "year", "genre", "track", "comment"] as const;
 
-type TagFields = z.infer<typeof TagShape>;
+type TagFields = Partial<Record<(typeof TAG_KEYS)[number], string>>;
 type AiFailure = {
   ok: false;
   error: string;
@@ -37,6 +27,57 @@ type AiFailure = {
 };
 type AiTagResult = { ok: true; tags: TagFields } | AiFailure;
 type GatewayJsonResult = { ok: true; data: unknown } | AiFailure;
+
+function assertRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Expected an object.");
+  }
+  return value as Record<string, unknown>;
+}
+
+function assertString(value: unknown, label: string): string {
+  if (typeof value !== "string") throw new Error(`${label} must be a string.`);
+  return value;
+}
+
+function readStringRecord(value: unknown): Record<string, string> {
+  const input = assertRecord(value);
+  const out: Record<string, string> = {};
+  for (const [key, item] of Object.entries(input)) {
+    if (typeof item !== "string") throw new Error(`${key} must be a string.`);
+    out[key] = item;
+  }
+  return out;
+}
+
+function validateFilenameInput(input: unknown) {
+  const record = assertRecord(input);
+  return { filename: assertString(record.filename, "filename") };
+}
+
+function validateIdentifyInput(input: unknown) {
+  const record = assertRecord(input);
+  return {
+    filename: assertString(record.filename, "filename"),
+    current: record.current === undefined ? undefined : readStringRecord(record.current),
+  };
+}
+
+function validateCleanupInput(input: unknown) {
+  const record = assertRecord(input);
+  return { tags: readStringRecord(record.tags) };
+}
+
+function validateCoverInput(input: unknown) {
+  const record = assertRecord(input);
+  return {
+    title: record.title === undefined ? undefined : assertString(record.title, "title"),
+    artist: record.artist === undefined ? undefined : assertString(record.artist, "artist"),
+    album: record.album === undefined ? undefined : assertString(record.album, "album"),
+    genre: record.genre === undefined ? undefined : assertString(record.genre, "genre"),
+    mood: record.mood === undefined ? undefined : assertString(record.mood, "mood"),
+  };
+}
 
 function failure(error: string, options: Partial<Omit<AiFailure, "ok" | "error">> = {}): AiFailure {
   return {
@@ -117,14 +158,24 @@ async function chatJson(system: string, user: string): Promise<GatewayJsonResult
 }
 
 function parseTags(data: unknown): AiTagResult {
-  const parsed = TagShape.safeParse(data);
-  if (!parsed.success) return failure("AI returned tags in an unexpected format.");
-  return { ok: true, tags: parsed.data };
+  try {
+    const record = assertRecord(data);
+    const tags: TagFields = {};
+    for (const key of TAG_KEYS) {
+      const value = record[key];
+      if (value === undefined) continue;
+      if (typeof value !== "string") return failure("AI returned tags in an unexpected format.");
+      tags[key] = value;
+    }
+    return { ok: true, tags };
+  } catch {
+    return failure("AI returned tags in an unexpected format.");
+  }
 }
 
 /** Parse a filename into ID3 tag fields. */
 export const aiParseFilename = createServerFn({ method: "POST" })
-  .inputValidator((i: unknown) => z.object({ filename: z.string() }).parse(i))
+  .validator(validateFilenameInput)
   .handler(async ({ data }) => {
     const out = await chatJson(
       "You extract music metadata from filenames. Reply with pure JSON keys: title, artist, album, track, year. Empty string if unknown. Do not guess year unless present. Strip extension and common separators.",
@@ -136,14 +187,7 @@ export const aiParseFilename = createServerFn({ method: "POST" })
 
 /** Identify/fill missing tags from what we have. */
 export const aiIdentify = createServerFn({ method: "POST" })
-  .inputValidator((i: unknown) =>
-    z
-      .object({
-        filename: z.string(),
-        current: z.record(z.string(), z.string()).optional(),
-      })
-      .parse(i),
-  )
+  .validator(validateIdentifyInput)
   .handler(async ({ data }) => {
     const known = JSON.stringify(data.current ?? {}, null, 2);
     const out = await chatJson(
@@ -156,9 +200,7 @@ export const aiIdentify = createServerFn({ method: "POST" })
 
 /** Clean/normalize tag strings (title case, artist normalization). */
 export const aiCleanup = createServerFn({ method: "POST" })
-  .inputValidator((i: unknown) =>
-    z.object({ tags: z.record(z.string(), z.string()) }).parse(i),
-  )
+  .validator(validateCleanupInput)
   .handler(async ({ data }) => {
     const out = await chatJson(
       "You clean music tags: fix Title Case for titles/albums, normalize featured artist notation to 'feat.', fix common typos, standardize known artist names, strip stray brackets, keep year and track digits only. Reply JSON with the same keys.",
@@ -170,17 +212,7 @@ export const aiCleanup = createServerFn({ method: "POST" })
 
 /** Generate an album cover image (base64 data URL) via image gen. */
 export const aiGenerateCover = createServerFn({ method: "POST" })
-  .inputValidator((i: unknown) =>
-    z
-      .object({
-        title: z.string().optional(),
-        artist: z.string().optional(),
-        album: z.string().optional(),
-        genre: z.string().optional(),
-        mood: z.string().optional(),
-      })
-      .parse(i),
-  )
+  .validator(validateCoverInput)
   .handler(async ({ data }) => {
     const headers = gatewayHeaders();
     const url = gatewayUrl("/images/generations");
