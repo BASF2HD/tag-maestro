@@ -1508,8 +1508,8 @@ function ColumnMenu({
         <MoreVertical className="h-3.5 w-3.5" />
       </Button>
       {open && (
-        <div className="absolute right-0 top-full z-50 mt-1 max-h-80 w-48 overflow-y-auto rounded-sm border border-border bg-white p-1 text-left text-[11px] text-black shadow-none">
-          <div className="px-1.5 py-1 font-semibold text-black">Customize...</div>
+        <div className="absolute right-0 top-full z-50 mt-1 max-h-80 w-48 overflow-y-auto rounded-sm border border-border bg-popover p-1 text-left text-[11px] text-popover-foreground shadow-none">
+          <div className="px-1.5 py-1 font-semibold text-popover-foreground">Customize...</div>
           <div className="my-0.5 border-t border-border/60" />
           {columns.map((col) => (
             <label
@@ -1727,7 +1727,7 @@ function EditorPanel({
                 value={tags.comment === MULTI ? "" : tags.comment}
                 placeholder={tags.comment === MULTI ? "<multiple values>" : ""}
                 onChange={(e) => onChange("comment", e.target.value)}
-                className="min-h-[32px] rounded-[1px] border-[#9a9a9a] bg-white px-1.5 py-0.5 text-[11px] leading-4 text-black shadow-none focus-visible:bg-white focus-visible:ring-0 focus-visible:border-primary"
+                className="min-h-[32px] rounded-[1px] border-border bg-background px-1.5 py-0.5 text-[11px] leading-4 text-foreground shadow-none focus-visible:bg-background focus-visible:ring-0 focus-visible:border-primary"
               />
             </div>
           ) : (
@@ -1787,12 +1787,12 @@ function TagFieldCombo({
         value={isMulti ? "" : value}
         placeholder={isMulti ? "<keep>" : ""}
         onChange={(e) => onChange(e.target.value)}
-        className="h-[22px] rounded-[1px] border-[#9a9a9a] bg-white px-1.5 py-0 pr-6 text-[11px] leading-none text-black shadow-none focus-visible:bg-white focus-visible:ring-0 focus-visible:border-primary"
+        className="h-[22px] rounded-[1px] border-border bg-background px-1.5 py-0 pr-6 text-[11px] leading-none text-foreground shadow-none focus-visible:bg-background focus-visible:ring-0 focus-visible:border-primary"
       />
       <button
         type="button"
         disabled={disabled}
-        className="absolute right-0.5 top-1/2 grid h-[18px] w-5 -translate-y-1/2 place-items-center rounded-sm text-zinc-700 hover:bg-zinc-100 hover:text-black disabled:opacity-100"
+        className="absolute right-0.5 top-1/2 grid h-[18px] w-5 -translate-y-1/2 place-items-center rounded-sm text-foreground hover:bg-accent hover:text-foreground disabled:opacity-100"
         aria-label="Choose value"
         aria-expanded={open}
         onClick={(e) => {
@@ -1805,7 +1805,7 @@ function TagFieldCombo({
       {open && (
         <div
           role="listbox"
-          className="absolute right-0 top-full z-50 mt-0.5 max-h-48 w-[240px] overflow-auto rounded-sm border border-border bg-white p-0.5 text-[11px] text-black shadow-none"
+          className="absolute right-0 top-full z-50 mt-0.5 max-h-48 w-[240px] overflow-auto rounded-sm border border-border bg-popover p-0.5 text-[11px] text-popover-foreground shadow-none"
         >
           <button
             type="button"
