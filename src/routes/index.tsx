@@ -2023,7 +2023,7 @@ function TagFieldCombo({
       {open && (
         <div
           role="listbox"
-          className="absolute right-0 top-full z-50 mt-px max-h-40 w-[240px] overflow-auto rounded-none border border-[#c8c8c8] p-0 text-[10.5px] leading-none shadow-none [background:Canvas] [color:CanvasText]"
+          className="absolute left-0 right-0 top-full z-50 mt-px max-h-40 w-auto overflow-auto rounded-none border border-[#c8c8c8] p-0 text-[10.5px] leading-none shadow-none [background:Canvas] [color:CanvasText]"
         >
           <button
             type="button"
