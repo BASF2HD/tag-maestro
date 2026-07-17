@@ -253,6 +253,7 @@ function TagMaestro() {
   const fileInput = useRef<HTMLInputElement>(null);
   const folderInput = useRef<HTMLInputElement>(null);
   const rootFolderInput = useRef<HTMLInputElement>(null);
+  const coverProbeIds = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     const saved = Number(localStorage.getItem("editorWidth"));
@@ -274,6 +275,35 @@ function TagMaestro() {
     () => files.filter((f) => selected.has(f.id)),
     [files, selected],
   );
+
+  useEffect(() => {
+    const first = selectedFiles[0];
+    if (!first || first.tags.cover || coverProbeIds.current.has(first.id)) return;
+
+    coverProbeIds.current.add(first.id);
+    let cancelled = false;
+    void readMp3(first.file, first.meta.path || first.file.name, true, true, first.sourceHandle).then((loaded) => {
+      const cover = loaded.tags.cover;
+      if (cancelled || !cover) return;
+      setFiles((prev) =>
+        prev.map((f) => {
+          const sameAlbumGroup =
+            Boolean(first.folderPath || first.tags.album) &&
+            f.folderPath === first.folderPath &&
+            f.tags.album === first.tags.album;
+          const sameTrack = f.id === first.id;
+          return !f.tags.cover && (sameTrack || sameAlbumGroup)
+            ? { ...f, tags: { ...f.tags, cover }, original: { ...f.original, cover } }
+            : f;
+        }),
+      );
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedFiles]);
+
   const filtered = useMemo(() => {
     const q = filter.toLowerCase();
     if (!q) return files;
