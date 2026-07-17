@@ -1792,7 +1792,7 @@ function TagFieldCombo({
       <button
         type="button"
         disabled={disabled}
-        className="absolute right-0.5 top-1/2 grid h-[18px] w-5 -translate-y-1/2 place-items-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40"
+        className="absolute right-0.5 top-1/2 grid h-[18px] w-5 -translate-y-1/2 place-items-center rounded-sm text-zinc-700 hover:bg-zinc-100 hover:text-black disabled:opacity-100"
         aria-label="Choose value"
         aria-expanded={open}
         onClick={(e) => {
