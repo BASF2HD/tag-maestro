@@ -1945,7 +1945,7 @@ function EditorPanel({
                 value={tags.comment === MULTI ? "" : tags.comment}
                 placeholder={tags.comment === MULTI ? "<multiple values>" : ""}
                 onChange={(e) => onChange("comment", e.target.value)}
-                className="min-h-[32px] rounded-[1px] border-border bg-background px-1.5 py-0.5 text-[11px] leading-4 text-foreground shadow-none focus-visible:bg-background focus-visible:ring-0 focus-visible:border-primary"
+                className="min-h-[32px] rounded-[1px] border-border bg-white px-1.5 py-0.5 text-[11px] leading-4 text-foreground shadow-none focus-visible:bg-white focus-visible:ring-0 focus-visible:border-primary dark:bg-background dark:focus-visible:bg-background"
               />
             </div>
           ) : (
@@ -2005,7 +2005,7 @@ function TagFieldCombo({
         value={isMulti ? "" : value}
         placeholder={isMulti ? "<keep>" : ""}
         onChange={(e) => onChange(e.target.value)}
-        className="h-[22px] rounded-[1px] border-border bg-background px-1.5 py-0 pr-6 text-[11px] leading-none text-foreground shadow-none focus-visible:bg-background focus-visible:ring-0 focus-visible:border-primary"
+        className="h-[22px] rounded-[1px] border-border bg-white px-1.5 py-0 pr-6 text-[11px] leading-none text-foreground shadow-none focus-visible:bg-white focus-visible:ring-0 focus-visible:border-primary dark:bg-background dark:focus-visible:bg-background"
       />
       <button
         type="button"
