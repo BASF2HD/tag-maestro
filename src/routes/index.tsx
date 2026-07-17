@@ -1805,7 +1805,7 @@ function TagFieldCombo({
       {open && (
         <div
           role="listbox"
-          className="absolute right-0 top-full z-50 mt-px max-h-40 w-[240px] overflow-auto rounded-none border p-0 text-[10.5px] leading-none shadow-none [background:Canvas] [border-color:ButtonBorder] [color:CanvasText]"
+          className="absolute right-0 top-full z-50 mt-px max-h-40 w-[240px] overflow-auto rounded-none border border-[#c8c8c8] p-0 text-[10.5px] leading-none shadow-none [background:Canvas] [color:CanvasText]"
         >
           <button
             type="button"
@@ -1827,7 +1827,7 @@ function TagFieldCombo({
           >
             &lt;blank&gt;
           </button>
-          {options.length > 0 && <div className="my-px border-t [border-color:ButtonBorder]" />}
+          {options.length > 0 && <div className="my-px border-t border-[#d8d8d8]" />}
           {options.map((opt) => (
             <button
               key={opt}
