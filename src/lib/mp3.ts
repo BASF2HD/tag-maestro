@@ -53,6 +53,7 @@ export interface FileMeta {
 export interface Mp3File {
   id: string;
   file: File;
+  sourceHandle?: FileSystemFileHandle;
   format: AudioFormat;
   tags: Mp3Tags;
   meta: FileMeta;
@@ -186,6 +187,7 @@ export async function readMp3(
   relativePath?: string,
   skipAudioDecode?: boolean,
   readEmbeddedCover = true,
+  sourceHandle?: FileSystemFileHandle,
 ): Promise<Mp3File> {
   const format = detectFormat(file);
   const tags = await new Promise<Mp3Tags>((resolve) => {
@@ -232,6 +234,7 @@ export async function readMp3(
   return {
     id: crypto.randomUUID(),
     file,
+    sourceHandle,
     format,
     tags,
     meta,

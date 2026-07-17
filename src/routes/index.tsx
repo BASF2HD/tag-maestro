@@ -84,6 +84,22 @@ type ImportProgress = {
   total?: number;
 };
 
+type FolderFileEntry = {
+  file: File;
+  relativePath: string;
+  handle?: FileSystemFileHandle;
+};
+
+type DirectoryPickerWindow = Window & {
+  showDirectoryPicker?: (options?: { mode?: "read" | "readwrite" }) => Promise<FileSystemDirectoryHandle>;
+};
+
+type WritableFileHandle = FileSystemFileHandle & {
+  createWritable: () => Promise<FileSystemWritableFileStream>;
+  queryPermission?: (descriptor?: { mode?: "read" | "readwrite" }) => Promise<PermissionState>;
+  requestPermission?: (descriptor?: { mode?: "read" | "readwrite" }) => Promise<PermissionState>;
+};
+
 const FIELDS: { key: TagKey; label: string }[] = [
   { key: "track", label: "Track" },
   { key: "title", label: "Title" },
@@ -157,6 +173,52 @@ function applyThemeClass(theme: "light" | "dark") {
     root.classList.add("dark");
     root.classList.remove("light");
   }
+}
+
+function asFolderEntry(item: File | FolderFileEntry): FolderFileEntry {
+  if ("file" in item) return item;
+  return {
+    file: item,
+    relativePath: (item as File & { webkitRelativePath?: string }).webkitRelativePath || item.name,
+  };
+}
+
+async function collectDirectoryEntries(
+  directoryHandle: FileSystemDirectoryHandle,
+): Promise<FolderFileEntry[]> {
+  const entries: FolderFileEntry[] = [];
+
+  async function walk(handle: FileSystemDirectoryHandle, path: string) {
+    for await (const [name, child] of (handle as any).entries()) {
+      const relativePath = path ? `${path}/${name}` : name;
+      if (child.kind === "directory") {
+        await walk(child as FileSystemDirectoryHandle, relativePath);
+      } else if (child.kind === "file") {
+        const fileHandle = child as FileSystemFileHandle;
+        const file = await fileHandle.getFile();
+        entries.push({ file, relativePath, handle: fileHandle });
+      }
+    }
+  }
+
+  await walk(directoryHandle, directoryHandle.name);
+  return entries;
+}
+
+async function ensureWritePermission(handle: WritableFileHandle): Promise<boolean> {
+  const descriptor = { mode: "readwrite" as const };
+  if (handle.queryPermission) {
+    const state = await handle.queryPermission(descriptor);
+    if (state === "granted") return true;
+  }
+  if (handle.requestPermission) {
+    return (await handle.requestPermission(descriptor)) === "granted";
+  }
+  return true;
+}
+
+function cloneTags(t: Mp3Tags): Mp3Tags {
+  return structuredClone({ ...t, cover: t.cover ? { ...t.cover } : undefined });
 }
 
 function TagMaestro() {
@@ -251,8 +313,9 @@ function TagMaestro() {
   };
 
   /** Handle adding files from a folder picker (single folder or root with subfolders). */
-  const handleAddFolder = useCallback(async (list: FileList | File[]) => {
+  const handleAddFolder = useCallback(async (list: FileList | File[] | FolderFileEntry[]) => {
     const pickedCount = list.length;
+    const source = list as ArrayLike<File | FolderFileEntry>;
     const pauseForPaint = () => new Promise<void>((resolve) => window.setTimeout(resolve, 0));
     setBusy(`Scanning selected folder…`);
     setImportProgress({
@@ -261,17 +324,18 @@ function TagMaestro() {
     });
     await pauseForPaint();
 
-    const audioFiles: File[] = [];
+    const audioFiles: FolderFileEntry[] = [];
     const coverByFolder = new Map<string, File>();
 
     // Scan once to avoid duplicating very large folder selections in memory.
     for (let i = 0; i < pickedCount; i++) {
-      const f = list[i];
+      const entry = asFolderEntry(source[i]);
+      const f = entry.file;
       const n = f.name.toLowerCase();
       if (SUPPORTED_EXTS.some((ext) => n.endsWith(ext))) {
-        audioFiles.push(f);
+        audioFiles.push(entry);
       } else if (IMAGE_EXTS.some((ext) => n.endsWith(ext))) {
-        const rp = (f as File & { webkitRelativePath?: string }).webkitRelativePath || "";
+        const rp = entry.relativePath;
         const parts = rp.replace(/\\/g, "/").split("/").filter(Boolean);
         const folderIdx = parts.findIndex((p) => /^covers?$/i.test(p));
         if (folderIdx >= 1) {
@@ -312,9 +376,8 @@ function TagMaestro() {
       for (let i = 0; i < total; i += BATCH) {
         const batch = audioFiles.slice(i, i + BATCH);
         const loaded = await Promise.all(
-          batch.map((f) => {
-            const rp = (f as File & { webkitRelativePath?: string }).webkitRelativePath || "";
-            return readMp3(f, rp, true, false);
+          batch.map((entry) => {
+            return readMp3(entry.file, entry.relativePath, true, false, entry.handle);
           }),
         );
 
@@ -363,6 +426,27 @@ function TagMaestro() {
       setImportProgress(null);
     }
   }, []);
+
+  const openFolderPicker = useCallback(async (fallbackInput: HTMLInputElement | null) => {
+    const picker = (window as DirectoryPickerWindow).showDirectoryPicker;
+    if (!picker) {
+      fallbackInput?.click();
+      return;
+    }
+
+    try {
+      const directoryHandle = await picker.call(window, { mode: "readwrite" });
+      setBusy("Opening folder…");
+      const entries = await collectDirectoryEntries(directoryHandle);
+      await handleAddFolder(entries);
+    } catch (e: any) {
+      if (e?.name !== "AbortError") {
+        toast.error(e?.message || "Folder open failed");
+      }
+      setBusy(null);
+      setImportProgress(null);
+    }
+  }, [handleAddFolder]);
 
   /** Update folder name for a single file, propagating to all files in the same original folder. */
   function updateFolderName(id: string, newName: string) {
@@ -447,13 +531,41 @@ function TagMaestro() {
   async function saveAll() {
     const targets = selectedFiles.length ? selectedFiles : files;
     if (!targets.length) return;
-    setBusy(`Packaging ${targets.length} file${targets.length > 1 ? "s" : ""}…`);
+    const canSaveDirect = targets.every((m) => m.sourceHandle);
+    setBusy(
+      canSaveDirect
+        ? `Saving ${targets.length} file${targets.length > 1 ? "s" : ""} directly…`
+        : `Packaging ${targets.length} file${targets.length > 1 ? "s" : ""}…`,
+    );
     try {
-      if (targets.length === 1) {
+      if (canSaveDirect) {
+        let saved = 0;
+        for (const m of targets) {
+          const handle = m.sourceHandle as WritableFileHandle;
+          const allowed = await ensureWritePermission(handle);
+          if (!allowed) throw new Error("Write permission was not granted for the selected folder");
+
+          const blob = await writeTagsToBlob(m);
+          const writable = await handle.createWritable();
+          await writable.write(blob);
+          await writable.close();
+          saved += 1;
+          setBusy(`Saving directly… ${saved}/${targets.length}`);
+        }
+
+        const savedIds = new Set(targets.map((m) => m.id));
+        setFiles((prev) =>
+          prev.map((f) =>
+            savedIds.has(f.id) ? { ...f, dirty: false, original: cloneTags(f.tags) } : f,
+          ),
+        );
+        toast.success(`Saved ${saved} file${saved > 1 ? "s" : ""} directly`);
+      } else if (targets.length === 1) {
         const m = targets[0];
         const blob = await writeTagsToBlob(m);
         const name = renamedFilename(m, pattern);
         triggerDownload(blob, name);
+        toast.info("Browser file input is read-only, so this file was exported");
       } else {
         const zip = new JSZip();
         for (const m of targets) {
@@ -464,9 +576,9 @@ function TagMaestro() {
           zip.file(uniqueName(zip, relativeFilePath), blob);
         }
         const zipBlob = await zip.generateAsync({ type: "blob" });
-        triggerDownload(zipBlob, "tagforge-export.zip");
+        triggerDownload(zipBlob, "tagmaestro-export.zip");
+        toast.info("These files were opened read-only, so TagMaestro exported a zip");
       }
-      toast.success("Saved");
     } catch (e: any) {
       toast.error(e?.message || "Save failed");
     } finally {
@@ -716,11 +828,11 @@ function TagMaestro() {
           <Upload className="mr-1.5 h-4 w-4" />
           Add files
         </Button>
-        <Button size="sm" variant="outline" onClick={() => folderInput.current?.click()}>
+        <Button size="sm" variant="outline" onClick={() => void openFolderPicker(folderInput.current)}>
           <FolderOpen className="mr-1.5 h-4 w-4" />
           Add Folder
         </Button>
-        <Button size="sm" variant="outline" onClick={() => rootFolderInput.current?.click()}>
+        <Button size="sm" variant="outline" onClick={() => void openFolderPicker(rootFolderInput.current)}>
           <FolderTree className="mr-1.5 h-4 w-4" />
           Add Root Folder
         </Button>
