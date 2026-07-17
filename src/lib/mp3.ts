@@ -185,6 +185,7 @@ export async function readMp3(
   file: File,
   relativePath?: string,
   skipAudioDecode?: boolean,
+  readEmbeddedCover = true,
 ): Promise<Mp3File> {
   const format = detectFormat(file);
   const tags = await new Promise<Mp3Tags>((resolve) => {
@@ -204,7 +205,7 @@ export async function readMp3(
         t.track = String(g.track || "");
         t.comment = typeof g.comment === "object" ? g.comment?.text || "" : g.comment || "";
         t.bpm = String(g.bpm || g.beatsPerMinute || "");
-        if (g.picture) {
+        if (readEmbeddedCover && g.picture) {
           const data = new Uint8Array(g.picture.data);
           const mime = g.picture.format || "image/jpeg";
           t.cover = { data, mime, dataUrl: u8ToDataUrl(data, mime) };

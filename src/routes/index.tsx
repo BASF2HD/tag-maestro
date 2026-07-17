@@ -8,7 +8,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   Music4,
   Upload,
@@ -255,23 +254,42 @@ function TagMaestro() {
   /** Handle adding files from a folder picker (single folder or root with subfolders). */
   const handleAddFolder = useCallback(async (list: FileList | File[]) => {
     const pickedCount = list.length;
+    const pauseForPaint = () => new Promise<void>((resolve) => window.setTimeout(resolve, 0));
     setBusy(`Scanning selected folder…`);
     setImportProgress({
       title: "Scanning folder",
       message: `Checking ${pickedCount} selected item${pickedCount === 1 ? "" : "s"} for supported audio files…`,
     });
-    await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+    await pauseForPaint();
 
-    const allFiles = Array.from(list);
-    // Separate audio files and image files
-    const audioFiles = allFiles.filter((f) => {
+    const audioFiles: File[] = [];
+    const coverByFolder = new Map<string, File>();
+
+    // Scan once to avoid duplicating very large folder selections in memory.
+    for (let i = 0; i < pickedCount; i++) {
+      const f = list[i];
       const n = f.name.toLowerCase();
-      return SUPPORTED_EXTS.some((ext) => n.endsWith(ext));
-    });
-    const imageFiles = allFiles.filter((f) => {
-      const n = f.name.toLowerCase();
-      return IMAGE_EXTS.some((ext) => n.endsWith(ext));
-    });
+      if (SUPPORTED_EXTS.some((ext) => n.endsWith(ext))) {
+        audioFiles.push(f);
+      } else if (IMAGE_EXTS.some((ext) => n.endsWith(ext))) {
+        const rp = (f as File & { webkitRelativePath?: string }).webkitRelativePath || "";
+        const parts = rp.replace(/\\/g, "/").split("/").filter(Boolean);
+        const folderIdx = parts.findIndex((p) => /^covers?$/i.test(p));
+        if (folderIdx >= 1) {
+          const albumPath = parts.slice(0, folderIdx).join("/");
+          if (!coverByFolder.has(albumPath)) coverByFolder.set(albumPath, f);
+        }
+      }
+
+      if (i > 0 && i % 1000 === 0) {
+        setImportProgress({
+          title: "Scanning folder",
+          message: `Checked ${i.toLocaleString()} items. Found ${audioFiles.length.toLocaleString()} audio files…`,
+        });
+        await pauseForPaint();
+      }
+    }
+
     if (!audioFiles.length) {
       setImportProgress(null);
       setBusy(null);
@@ -279,26 +297,11 @@ function TagMaestro() {
       return;
     }
 
-    // Build a map of folder path -> cover image file (from /cover/ subfolders)
-    const coverByFolder = new Map<string, File>();
-    for (const img of imageFiles) {
-      const rp = (img as File & { webkitRelativePath?: string }).webkitRelativePath || "";
-      const parts = rp.replace(/\\/g, "/").split("/").filter(Boolean);
-      // Check if image is inside a "cover" or "covers" subfolder
-      const folderIdx = parts.findIndex((p) => /^covers?$/i.test(p));
-      if (folderIdx >= 1) {
-        // The album folder is everything before the "cover" folder
-        const albumPath = parts.slice(0, folderIdx).join("/");
-        if (!coverByFolder.has(albumPath)) {
-          coverByFolder.set(albumPath, img);
-        }
-      }
-    }
-
     // Process audio files in batches for smooth progress
-    const BATCH = 50;
+    const BATCH = 25;
     const total = audioFiles.length;
     let loadedCount = 0;
+    const coverCache = new Map<string, Mp3Tags["cover"]>();
     setBusy(`Reading files… 0/${total}`);
     setImportProgress({
       title: "Reading audio tags",
@@ -312,7 +315,7 @@ function TagMaestro() {
         const loaded = await Promise.all(
           batch.map((f) => {
             const rp = (f as File & { webkitRelativePath?: string }).webkitRelativePath || "";
-            return readMp3(f, rp, true);
+            return readMp3(f, rp, true, false);
           }),
         );
 
@@ -323,17 +326,22 @@ function TagMaestro() {
             const coverImg = coverByFolder.get(m.folderPath);
             if (coverImg) {
               try {
-                const reader = new FileReader();
-                const dataUrl = await new Promise<string>((resolve, reject) => {
-                  reader.onload = () => resolve(String(reader.result));
-                  reader.onerror = reject;
-                  reader.readAsDataURL(coverImg);
-                });
-                const mime = coverImg.type || "image/jpeg";
-                const bin = atob(dataUrl.split(",")[1]);
-                const data = new Uint8Array(bin.length);
-                for (let j = 0; j < bin.length; j++) data[j] = bin.charCodeAt(j);
-                m.tags.cover = { data, mime, dataUrl };
+                let cover = coverCache.get(m.folderPath);
+                if (!cover) {
+                  const reader = new FileReader();
+                  const dataUrl = await new Promise<string>((resolve, reject) => {
+                    reader.onload = () => resolve(String(reader.result));
+                    reader.onerror = reject;
+                    reader.readAsDataURL(coverImg);
+                  });
+                  const mime = coverImg.type || "image/jpeg";
+                  const bin = atob(dataUrl.split(",")[1]);
+                  const data = new Uint8Array(bin.length);
+                  for (let j = 0; j < bin.length; j++) data[j] = bin.charCodeAt(j);
+                  cover = { data, mime, dataUrl };
+                  coverCache.set(m.folderPath, cover);
+                }
+                m.tags.cover = cover;
               } catch { /* skip cover on error */ }
             }
           }
@@ -348,6 +356,7 @@ function TagMaestro() {
           loaded: loadedCount,
           total,
         });
+        await pauseForPaint();
       }
       toast.success(`Loaded ${loadedCount} file${loadedCount > 1 ? "s" : ""} from folder`);
     } finally {
@@ -667,7 +676,7 @@ function TagMaestro() {
         files={selectedFiles.length ? selectedFiles : files}
         onApply={handleBulkFieldEdit}
       />
-      <ImportProgressDialog progress={importProgress} />
+      <ImportProgressPanel progress={importProgress} />
 
       {/* Header */}
       <header className="shrink-0 border-b border-border bg-sidebar/60 backdrop-blur px-3 py-2 flex items-center gap-2">
@@ -889,37 +898,30 @@ function TagMaestro() {
   );
 }
 
-function ImportProgressDialog({ progress }: { progress: ImportProgress | null }) {
+function ImportProgressPanel({ progress }: { progress: ImportProgress | null }) {
   const hasProgress = typeof progress?.loaded === "number" && typeof progress.total === "number";
   const percent = hasProgress && progress.total ? Math.round((progress.loaded! / progress.total) * 100) : 0;
 
+  if (!progress) return null;
+
   return (
-    <Dialog open={Boolean(progress)}>
-      <DialogContent className="max-w-sm rounded-md p-4 shadow-none">
-        <DialogHeader className="space-y-1 text-left">
-          <DialogTitle className="flex items-center gap-2 text-sm">
-            <Loader2 className="h-4 w-4 animate-spin text-primary" />
-            {progress?.title || "Loading folder"}
-          </DialogTitle>
-        </DialogHeader>
-        <div className="mt-3 space-y-2">
-          <p className="text-xs text-muted-foreground">{progress?.message}</p>
-          {hasProgress && (
-            <>
-              <div className="h-1.5 overflow-hidden rounded-sm bg-muted">
-                <div
-                  className="h-full bg-primary transition-[width]"
-                  style={{ width: `${percent}%` }}
-                />
-              </div>
-              <p className="text-[11px] text-muted-foreground">
-                {progress.loaded} of {progress.total} files
-              </p>
-            </>
-          )}
-        </div>
-      </DialogContent>
-    </Dialog>
+    <div className="pointer-events-none fixed bottom-3 right-3 z-50 w-[min(340px,calc(100vw-24px))] rounded-md border border-border bg-background p-3 text-foreground shadow-sm">
+      <div className="flex items-center gap-2 text-sm font-medium">
+        <Loader2 className="h-4 w-4 animate-spin text-primary" />
+        {progress.title}
+      </div>
+      <p className="mt-2 text-xs text-muted-foreground">{progress.message}</p>
+      {hasProgress && (
+        <>
+          <div className="mt-2 h-1.5 overflow-hidden rounded-sm bg-muted">
+            <div className="h-full bg-primary" style={{ width: `${percent}%` }} />
+          </div>
+          <p className="mt-1.5 text-[11px] text-muted-foreground">
+            {progress.loaded} of {progress.total} files
+          </p>
+        </>
+      )}
+    </div>
   );
 }
 
