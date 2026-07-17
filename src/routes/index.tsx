@@ -1377,18 +1377,17 @@ function FileTable({
       )}
 
       {/* Table container */}
-      <div className="flex-1 overflow-auto">
-        <table className="w-full text-xs border-collapse table-fixed">
-          {/* Header background stands out (contrasting background with distinct border) */}
-          <thead className="sticky top-0 z-10 bg-secondary/80 backdrop-blur-md text-muted-foreground border-b border-border shadow-[0_1px_2px_rgba(0,0,0,0.15)]">
-            <tr className="border-b border-border bg-secondary/30">
-              <th style={{ width: 36, minWidth: 36, maxWidth: 36 }} className="px-2 py-1.5 text-left">
+      <div className="flex-1 overflow-auto bg-white text-slate-950">
+        <table className="w-full border-collapse table-fixed bg-white text-xs text-slate-950">
+          <thead className="sticky top-0 z-10 border-b border-slate-300 bg-[#f3f4f6] text-slate-700">
+            <tr className="border-b border-slate-300 bg-[#f3f4f6]">
+              <th style={{ width: 36, minWidth: 36, maxWidth: 36 }} className="px-2 py-0.5 text-left">
                 <input
                   type="checkbox"
                   checked={allPageSelected}
                   onChange={(e) => handleHeaderCheckboxChange(e.currentTarget.checked)}
                   aria-label="Select page"
-                  className="h-3.5 w-3.5 accent-primary"
+                  className="h-3 w-3 accent-primary"
                 />
               </th>
               {visible.map((col) => {
@@ -1409,12 +1408,12 @@ function FileTable({
                     onDragLeave={handleDragLeave}
                     onDrop={(e) => handleDrop(e, col.key)}
                     onDragEnd={handleDragEnd}
-                    className={`py-1 text-left font-semibold text-foreground/80 relative group select-none transition-all ${
-                      col.key !== "cover" ? "cursor-grab active:cursor-grabbing hover:bg-accent/30" : ""
+                    className={`relative group select-none py-0.5 text-left font-semibold text-slate-700 transition-all ${
+                      col.key !== "cover" ? "cursor-grab active:cursor-grabbing hover:bg-slate-200/70" : ""
                     } ${
                       isOver ? "border-l-2 border-l-primary pl-1.5 pr-2" : "px-2"
                     } ${
-                      isDragged ? "opacity-40 bg-accent/20" : ""
+                      isDragged ? "bg-slate-200 opacity-40" : ""
                     } ${col.className ?? ""}`}
                     onClick={() => handleSort(col.key)}
                   >
@@ -1423,7 +1422,7 @@ function FileTable({
                       {col.key !== "cover" && (
                         <span
                           className={`shrink-0 transition-colors ${
-                            sortKey === col.key ? "text-primary opacity-100" : "text-muted-foreground/60 group-hover:text-foreground/80"
+                            sortKey === col.key ? "text-primary opacity-100" : "text-slate-400 group-hover:text-slate-700"
                           }`}
                         >
                           {sortKey === col.key ? (
@@ -1444,12 +1443,12 @@ function FileTable({
                       onClick={(e) => e.stopPropagation()}
                       className="absolute right-0 top-0 bottom-0 w-3 -mr-1.5 cursor-col-resize z-20 flex items-center justify-center"
                     >
-                      <div className="w-0.5 h-full bg-border/30 group-hover:bg-primary/60 group-hover:w-1 transition-all rounded-full" />
+                      <div className="h-full w-0.5 rounded-full bg-slate-300 transition-all group-hover:w-1 group-hover:bg-primary/60" />
                     </div>
                   </th>
                 );
               })}
-              <th style={{ width: 32, minWidth: 32, maxWidth: 32 }} className="px-1 py-1 text-right">
+              <th style={{ width: 32, minWidth: 32, maxWidth: 32 }} className="px-1 py-0.5 text-right">
                 <ColumnMenu
                   columns={TABLE_COLUMNS}
                   visibleColumns={visibleColumns}
@@ -1465,7 +1464,7 @@ function FileTable({
                 <tr
                   key={f.id}
                   data-selected={isSel}
-                  className="h-6 border-b border-border/60 hover:bg-accent/40 data-[selected=true]:bg-primary/10 data-[selected=true]:hover:bg-primary/15"
+                  className="h-6 border-b border-slate-200 bg-white hover:bg-slate-50 data-[selected=true]:bg-blue-50 data-[selected=true]:hover:bg-blue-100"
                   onClick={(e) => onToggle(f.id, e.metaKey || e.ctrlKey || e.shiftKey)}
                   onContextMenu={(e) => openRowMenu(e, f)}
                 >
@@ -1476,7 +1475,7 @@ function FileTable({
                       onChange={() => onToggle(f.id, true)}
                       onClick={(e) => e.stopPropagation()}
                       aria-label="Select"
-                      className="h-3.5 w-3.5 accent-primary"
+                      className="h-3 w-3 accent-primary"
                     />
                   </td>
                   {visible.map((col) => (
@@ -1822,7 +1821,7 @@ function TableCell({
   return (
     <td
       style={colStyle}
-      className="px-2 py-0.5 text-muted-foreground truncate"
+      className="truncate px-2 py-0.5 text-slate-700"
       title={readOnly}
     >
       {col.kind === "filename" && file.dirty && (
@@ -1845,7 +1844,7 @@ function TdCell({
   return (
     <td style={style} className="px-1 py-px">
       <input
-        className="h-5 w-full truncate rounded bg-transparent px-1.5 py-0 text-[11px] leading-none outline-none focus:bg-background focus:ring-1 focus:ring-primary"
+        className="h-5 w-full truncate rounded-none bg-transparent px-1.5 py-0 text-[11px] leading-none text-slate-950 outline-none focus:bg-white focus:ring-1 focus:ring-primary"
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onClick={(e) => e.stopPropagation()}
