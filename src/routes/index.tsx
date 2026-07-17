@@ -16,7 +16,6 @@ import {
   Wand2,
   Image as ImageIcon,
   FileText,
-  Trash2,
   Download,
   Loader2,
   Search,
@@ -184,7 +183,7 @@ function TagMaestro() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState<string | null>(null);
   const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
-  const [pattern, setPattern] = useState("%artist% - %title%");
+  const [pattern] = useState("%artist% - %title%");
   const [filter, setFilter] = useState("");
   const [folderRenameOpen, setFolderRenameOpen] = useState(false);
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
@@ -813,38 +812,8 @@ function TagMaestro() {
               onSelectAll={setSelected}
               onEdit={updateTag}
               onEditFolder={updateFolderName}
+              onRemoveSelected={removeSelected}
             />
-          )}
-
-          {files.length > 0 && (
-            <div className="border-t border-border px-3 py-2 flex items-center gap-2 text-xs text-muted-foreground bg-sidebar/40">
-              <span>
-                {files.length} file{files.length > 1 ? "s" : ""} · {selectedFiles.length} selected ·{" "}
-                {files.filter((f) => f.dirty).length} unsaved
-              </span>
-              <div className="ml-auto flex items-center gap-2">
-                <Label htmlFor="pattern" className="text-xs text-muted-foreground">
-                  Rename:
-                </Label>
-                <Input
-                  id="pattern"
-                  value={pattern}
-                  onChange={(e) => setPattern(e.target.value)}
-                  className="h-7 w-64 text-xs font-mono"
-                  placeholder="%artist% - %title%"
-                />
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={removeSelected}
-                  disabled={!selected.size}
-                  className="text-destructive hover:text-destructive"
-                >
-                  <Trash2 className="mr-1.5 h-3.5 w-3.5" />
-                  Remove
-                </Button>
-              </div>
-            </div>
           )}
         </main>
 
@@ -1056,6 +1025,7 @@ function FileTable({
   onSelectAll,
   onEdit,
   onEditFolder,
+  onRemoveSelected,
 }: {
   files: Mp3File[];
   selected: Set<string>;
@@ -1064,6 +1034,7 @@ function FileTable({
   onSelectAll: (selected: Set<string>) => void;
   onEdit: (id: string, key: TagKey, value: string) => void;
   onEditFolder: (id: string, value: string) => void;
+  onRemoveSelected: () => void;
 }) {
   const [visibleColumns, setVisibleColumns] = useState<Set<TableColumnKey>>(
     () => new Set(DEFAULT_VISIBLE_COLUMNS),
@@ -1135,6 +1106,7 @@ function FileTable({
   // Pagination states
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(100);
+  const [rowMenu, setRowMenu] = useState<{ id: string; x: number; y: number } | null>(null);
 
   // Reset current page when the files count, search filter, or sort key/order changes
   useEffect(() => {
@@ -1266,6 +1238,37 @@ function FileTable({
   function handleClearSelection() {
     onSelectAll(new Set());
   }
+
+  function openRowMenu(e: React.MouseEvent<HTMLTableRowElement>, file: Mp3File) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!selected.has(file.id)) {
+      onSelectAll(new Set([file.id]));
+    }
+    setRowMenu({
+      id: file.id,
+      x: Math.min(e.clientX, window.innerWidth - 220),
+      y: Math.min(e.clientY, window.innerHeight - 260),
+    });
+  }
+
+  useEffect(() => {
+    if (!rowMenu) return;
+    const close = () => setRowMenu(null);
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close();
+    };
+    window.addEventListener("click", close);
+    window.addEventListener("resize", close);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("resize", close);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [rowMenu]);
 
   // High performance resize handler using CSS variables + rAF throttling
   function handleResizeStart(key: TableColumnKey, startEvent: React.MouseEvent) {
@@ -1464,6 +1467,7 @@ function FileTable({
                   data-selected={isSel}
                   className="h-6 border-b border-border/60 hover:bg-accent/40 data-[selected=true]:bg-primary/10 data-[selected=true]:hover:bg-primary/15"
                   onClick={(e) => onToggle(f.id, e.metaKey || e.ctrlKey || e.shiftKey)}
+                  onContextMenu={(e) => openRowMenu(e, f)}
                 >
                   <td style={{ width: 36, minWidth: 36, maxWidth: 36 }} className="px-2 py-0.5">
                     <input
@@ -1491,6 +1495,85 @@ function FileTable({
           </tbody>
         </table>
       </div>
+
+      {rowMenu && (
+        <div
+          className="fixed z-[70] w-52 rounded-sm border border-border bg-background py-1 text-xs text-foreground shadow-sm"
+          style={{ left: rowMenu.x, top: rowMenu.y }}
+          onClick={(e) => e.stopPropagation()}
+          onContextMenu={(e) => e.preventDefault()}
+        >
+          <ContextMenuItem
+            onSelect={() => {
+              onSelectAll(new Set([rowMenu.id]));
+              setRowMenu(null);
+            }}
+          >
+            Select only this row
+          </ContextMenuItem>
+          <ContextMenuItem
+            disabled={selected.has(rowMenu.id)}
+            onSelect={() => {
+              const next = new Set(selected);
+              next.add(rowMenu.id);
+              onSelectAll(next);
+              setRowMenu(null);
+            }}
+          >
+            Add row to selection
+          </ContextMenuItem>
+          <ContextMenuItem
+            disabled={!selected.has(rowMenu.id)}
+            onSelect={() => {
+              const next = new Set(selected);
+              next.delete(rowMenu.id);
+              onSelectAll(next);
+              setRowMenu(null);
+            }}
+          >
+            Remove row from selection
+          </ContextMenuItem>
+          <div className="my-1 border-t border-border" />
+          <ContextMenuItem
+            onSelect={() => {
+              const next = new Set(selected);
+              for (const f of pageFiles) next.add(f.id);
+              onSelectAll(next);
+              setRowMenu(null);
+            }}
+          >
+            Select page
+          </ContextMenuItem>
+          <ContextMenuItem
+            onSelect={() => {
+              handleSelectAllFiltered();
+              setRowMenu(null);
+            }}
+          >
+            Select all filtered
+          </ContextMenuItem>
+          <ContextMenuItem
+            disabled={!selected.size}
+            onSelect={() => {
+              handleClearSelection();
+              setRowMenu(null);
+            }}
+          >
+            Clear selection
+          </ContextMenuItem>
+          <div className="my-1 border-t border-border" />
+          <ContextMenuItem
+            danger
+            disabled={!selected.size}
+            onSelect={() => {
+              onRemoveSelected();
+              setRowMenu(null);
+            }}
+          >
+            Remove selected
+          </ContextMenuItem>
+        </div>
+      )}
 
       {/* Pagination Footer */}
       <div className="border-t border-border px-4 py-2 flex items-center justify-between text-xs bg-sidebar/40 backdrop-blur select-none h-11 shrink-0">
@@ -1577,6 +1660,33 @@ function FileTable({
         </div>
       </div>
     </div>
+  );
+}
+
+function ContextMenuItem({
+  children,
+  disabled,
+  danger,
+  onSelect,
+}: {
+  children: React.ReactNode;
+  disabled?: boolean;
+  danger?: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      className={`block h-7 w-full px-3 text-left text-xs disabled:cursor-not-allowed disabled:opacity-45 ${
+        danger
+          ? "text-destructive hover:bg-destructive/10"
+          : "hover:bg-accent hover:text-accent-foreground"
+      }`}
+      onClick={onSelect}
+    >
+      {children}
+    </button>
   );
 }
 
