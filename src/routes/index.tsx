@@ -1367,10 +1367,10 @@ function FileTable({
       )}
 
       {/* Table container */}
-      <div className="flex-1 overflow-auto bg-white text-slate-950">
-        <table className="w-full border-collapse table-fixed bg-white text-xs text-slate-950">
-          <thead className="sticky top-0 z-10 border-b border-slate-300 bg-[#f3f4f6] text-[11px] leading-none text-slate-700">
-            <tr className="h-[19px] border-b border-slate-300 bg-[#f3f4f6]">
+      <div className="flex-1 overflow-auto bg-white text-slate-950 dark:bg-background dark:text-foreground">
+        <table className="w-full border-collapse table-fixed bg-white text-xs text-slate-950 dark:bg-background dark:text-foreground">
+          <thead className="sticky top-0 z-10 border-b border-slate-300 bg-[#f3f4f6] text-[11px] leading-none text-slate-700 dark:border-border dark:bg-secondary/80 dark:text-muted-foreground">
+            <tr className="h-[19px] border-b border-slate-300 bg-[#f3f4f6] dark:border-border dark:bg-secondary/30">
               <th style={{ width: 36, minWidth: 36, maxWidth: 36 }} className="h-[19px] px-2 py-0 text-left">
                 <input
                   type="checkbox"
@@ -1398,12 +1398,12 @@ function FileTable({
                     onDragLeave={handleDragLeave}
                     onDrop={(e) => handleDrop(e, col.key)}
                     onDragEnd={handleDragEnd}
-                    className={`relative group h-[19px] select-none py-0 text-left font-semibold text-slate-700 ${
-                      col.key !== "cover" ? "cursor-grab active:cursor-grabbing hover:bg-slate-200/70" : ""
+                    className={`relative group h-[19px] select-none py-0 text-left font-semibold text-slate-700 dark:text-foreground/80 ${
+                      col.key !== "cover" ? "cursor-grab active:cursor-grabbing hover:bg-slate-200/70 dark:hover:bg-accent/30" : ""
                     } ${
                       isOver ? "border-l-2 border-l-primary pl-1.5 pr-2" : "px-2"
                     } ${
-                      isDragged ? "bg-slate-200 opacity-40" : ""
+                      isDragged ? "bg-slate-200 opacity-40 dark:bg-accent/20" : ""
                     } ${col.className ?? ""}`}
                     onClick={() => handleSort(col.key)}
                   >
@@ -1412,7 +1412,7 @@ function FileTable({
                       {col.key !== "cover" && (
                         <span
                           className={`shrink-0 transition-colors ${
-                            sortKey === col.key ? "text-primary opacity-100" : "text-slate-400 group-hover:text-slate-700"
+                            sortKey === col.key ? "text-primary opacity-100" : "text-slate-400 group-hover:text-slate-700 dark:text-muted-foreground/60 dark:group-hover:text-foreground/80"
                           }`}
                         >
                           {sortKey === col.key ? (
@@ -1433,7 +1433,7 @@ function FileTable({
                       onClick={(e) => e.stopPropagation()}
                       className="absolute right-0 top-0 bottom-0 w-3 -mr-1.5 cursor-col-resize z-20 flex items-center justify-center"
                     >
-                      <div className="h-full w-0.5 rounded-full bg-slate-300 group-hover:bg-primary/60" />
+                      <div className="h-full w-0.5 rounded-full bg-slate-300 group-hover:bg-primary/60 dark:bg-border/30" />
                     </div>
                   </th>
                 );
@@ -1454,7 +1454,7 @@ function FileTable({
                 <tr
                   key={f.id}
                   data-selected={isSel}
-                  className="h-6 border-b border-slate-200 bg-white hover:bg-slate-50 data-[selected=true]:bg-blue-50 data-[selected=true]:hover:bg-blue-100"
+                  className="h-6 border-b border-slate-200 bg-white hover:bg-slate-50 data-[selected=true]:bg-blue-50 data-[selected=true]:hover:bg-blue-100 dark:border-border/60 dark:bg-transparent dark:hover:bg-accent/40 dark:data-[selected=true]:bg-primary/10 dark:data-[selected=true]:hover:bg-primary/15"
                   onClick={(e) => onToggle(f.id, e.metaKey || e.ctrlKey || e.shiftKey)}
                   onContextMenu={(e) => openRowMenu(e, f)}
                 >
@@ -1811,7 +1811,7 @@ function TableCell({
   return (
     <td
       style={colStyle}
-      className="truncate px-2 py-0.5 text-slate-700"
+      className="truncate px-2 py-0.5 text-slate-700 dark:text-muted-foreground"
       title={readOnly}
     >
       {col.kind === "filename" && file.dirty && (
@@ -1834,7 +1834,7 @@ function TdCell({
   return (
     <td style={style} className="px-1 py-px">
       <input
-        className="h-5 w-full truncate rounded-none bg-transparent px-1.5 py-0 text-[11px] leading-none text-slate-950 outline-none focus:bg-white focus:ring-1 focus:ring-primary"
+        className="h-5 w-full truncate rounded-none bg-transparent px-1.5 py-0 text-[11px] leading-none text-slate-950 outline-none focus:bg-white focus:ring-1 focus:ring-primary dark:text-foreground dark:focus:bg-background"
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onClick={(e) => e.stopPropagation()}
