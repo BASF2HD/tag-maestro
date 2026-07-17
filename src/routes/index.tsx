@@ -1805,11 +1805,11 @@ function TagFieldCombo({
       {open && (
         <div
           role="listbox"
-          className="absolute right-0 top-full z-50 mt-0.5 max-h-48 w-[240px] overflow-auto rounded-sm border border-border bg-popover p-0.5 text-[11px] text-popover-foreground shadow-none"
+          className="absolute right-0 top-full z-50 mt-px max-h-40 w-[240px] overflow-auto rounded-none border p-0 text-[10.5px] leading-none shadow-none [background:Canvas] [border-color:ButtonBorder] [color:CanvasText]"
         >
           <button
             type="button"
-            className="w-full rounded-sm px-1.5 py-0.5 text-left text-[11px] leading-5 italic text-muted-foreground hover:bg-accent"
+            className="block h-[18px] w-full px-1.5 py-0 text-left text-[10.5px] italic leading-[18px] [color:GrayText] hover:[background:Highlight] hover:[color:HighlightText] focus:[background:Highlight] focus:[color:HighlightText] focus:outline-none"
             onClick={() => {
               onChange(MULTI);
               setOpen(false);
@@ -1819,7 +1819,7 @@ function TagFieldCombo({
           </button>
           <button
             type="button"
-            className="w-full rounded-sm px-1.5 py-0.5 text-left text-[11px] leading-5 italic text-muted-foreground hover:bg-accent"
+            className="block h-[18px] w-full px-1.5 py-0 text-left text-[10.5px] italic leading-[18px] [color:GrayText] hover:[background:Highlight] hover:[color:HighlightText] focus:[background:Highlight] focus:[color:HighlightText] focus:outline-none"
             onClick={() => {
               onChange("");
               setOpen(false);
@@ -1827,12 +1827,12 @@ function TagFieldCombo({
           >
             &lt;blank&gt;
           </button>
-          {options.length > 0 && <div className="my-0.5 border-t border-border/60" />}
+          {options.length > 0 && <div className="my-px border-t [border-color:ButtonBorder]" />}
           {options.map((opt) => (
             <button
               key={opt}
               type="button"
-              className="w-full truncate rounded-sm px-1.5 py-0.5 text-left text-[11px] leading-5 hover:bg-accent"
+              className="block h-[18px] w-full truncate px-1.5 py-0 text-left text-[10.5px] leading-[18px] hover:[background:Highlight] hover:[color:HighlightText] focus:[background:Highlight] focus:[color:HighlightText] focus:outline-none"
               title={opt}
               onClick={() => {
                 onChange(opt);
@@ -1843,7 +1843,7 @@ function TagFieldCombo({
             </button>
           ))}
           {options.length === 0 && (
-            <div className="px-1.5 py-1 text-[11px] italic text-muted-foreground">No values in selection</div>
+            <div className="h-[18px] px-1.5 py-0 text-[10.5px] italic leading-[18px] [color:GrayText]">No values in selection</div>
           )}
         </div>
       )}
