@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import JSZip from "jszip";
 import { Toaster, toast } from "@/components/ui/sonner";
 import { Button } from "@/components/ui/button";
@@ -132,26 +132,45 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
 }
 
+function getSavedTheme(): "light" | "dark" {
+  if (typeof window === "undefined") return "light";
+  try {
+    const savedTheme = window.localStorage.getItem("theme");
+    return savedTheme === "dark" ? "dark" : "light";
+  } catch {
+    return "light";
+  }
+}
+
+function applyThemeClass(theme: "light" | "dark") {
+  const root = document.documentElement;
+  if (theme === "light") {
+    root.classList.add("light");
+    root.classList.remove("dark");
+  } else {
+    root.classList.add("dark");
+    root.classList.remove("light");
+  }
+}
+
 function TagMaestro() {
-  const [theme, setTheme] = useState<'light' | 'dark'>('dark');
+  const [theme, setTheme] = useState<"light" | "dark">(getSavedTheme);
+  const [themeReady, setThemeReady] = useState(false);
+
+  useLayoutEffect(() => {
+    applyThemeClass(theme);
+  }, [theme]);
 
   useEffect(() => {
-    const savedTheme = localStorage.getItem("theme");
-    if (savedTheme === "light" || savedTheme === "dark") {
-      setTheme(savedTheme);
-    }
+    setThemeReady(true);
   }, []);
 
   useEffect(() => {
-    const root = document.documentElement;
-    if (theme === 'light') {
-      root.classList.add('light');
-      root.classList.remove('dark');
-    } else {
-      root.classList.add('dark');
-      root.classList.remove('light');
+    try {
+      localStorage.setItem("theme", theme);
+    } catch {
+      /* storage may be unavailable in private or embedded browser contexts */
     }
-    localStorage.setItem('theme', theme);
   }, [theme]);
 
   const [files, setFiles] = useState<Mp3File[]>([]);
@@ -722,9 +741,10 @@ function TagMaestro() {
             size="icon"
             className="h-8 w-8 text-muted-foreground hover:text-foreground shrink-0"
             onClick={() => setTheme(theme === "light" ? "dark" : "light")}
-            title={theme === "light" ? "Switch to dark theme" : "Switch to light theme"}
+            title={themeReady ? (theme === "light" ? "Switch to dark theme" : "Switch to light theme") : "Toggle theme"}
+            suppressHydrationWarning
           >
-            {theme === "light" ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
+            {themeReady && theme === "light" ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
           </Button>
         </div>
       </header>
