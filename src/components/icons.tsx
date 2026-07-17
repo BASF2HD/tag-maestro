@@ -1,25 +1,8 @@
 import type { SVGProps } from "react";
 
 type IconProps = SVGProps<SVGSVGElement>;
-type PathDef = {
-  d?: string;
-  points?: string;
-  cx?: number;
-  cy?: number;
-  r?: number;
-  x?: number;
-  y?: number;
-  width?: number;
-  height?: number;
-  rx?: number;
-  kind?: "path" | "polyline" | "line" | "circle" | "rect";
-  x1?: number;
-  y1?: number;
-  x2?: number;
-  y2?: number;
-};
 
-function icon(paths: PathDef[]) {
+function icon(body: string) {
   return function Icon({ className, ...props }: IconProps) {
     return (
       <svg
@@ -31,48 +14,104 @@ function icon(paths: PathDef[]) {
         strokeLinejoin="round"
         className={className}
         aria-hidden="true"
+        dangerouslySetInnerHTML={{ __html: body }}
         {...props}
-      >
-        {paths.map((p, i) => {
-          if (p.kind === "polyline") return <polyline key={i} points={p.points} />;
-          if (p.kind === "line") return <line key={i} x1={p.x1} y1={p.y1} x2={p.x2} y2={p.y2} />;
-          if (p.kind === "circle") return <circle key={i} cx={p.cx} cy={p.cy} r={p.r} />;
-          if (p.kind === "rect") return <rect key={i} x={p.x} y={p.y} width={p.width} height={p.height} rx={p.rx} />;
-          return <path key={i} d={p.d} />;
-        })}
-      </svg>
+      />
     );
   };
 }
 
-export const ArrowDown = icon([{ kind: "line", x1: 12, y1: 5, x2: 12, y2: 19 }, { kind: "polyline", points: "19 12 12 19 5 12" }]);
-export const ArrowRight = icon([{ kind: "line", x1: 5, y1: 12, x2: 19, y2: 12 }, { kind: "polyline", points: "12 5 19 12 12 19" }]);
-export const ArrowUp = icon([{ kind: "line", x1: 12, y1: 19, x2: 12, y2: 5 }, { kind: "polyline", points: "5 12 12 5 19 12" }]);
-export const ArrowUpDown = icon([{ kind: "polyline", points: "7 7 12 2 17 7" }, { kind: "line", x1: 12, y1: 2, x2: 12, y2: 22 }, { kind: "polyline", points: "17 17 12 22 7 17" }]);
-export const CaseSensitive = icon([{ d: "M4 19 9 5h2l5 14" }, { kind: "line", x1: 6, y1: 14, x2: 14, y2: 14 }, { d: "M18 12h2a2 2 0 0 1 0 4h-2v-8" }]);
-export const ChevronDown = icon([{ kind: "polyline", points: "6 9 12 15 18 9" }]);
-export const ChevronLeft = icon([{ kind: "polyline", points: "15 18 9 12 15 6" }]);
-export const ChevronRight = icon([{ kind: "polyline", points: "9 18 15 12 9 6" }]);
-export const ChevronsLeft = icon([{ kind: "polyline", points: "11 17 6 12 11 7" }, { kind: "polyline", points: "18 17 13 12 18 7" }]);
-export const ChevronsRight = icon([{ kind: "polyline", points: "6 17 11 12 6 7" }, { kind: "polyline", points: "13 17 18 12 13 7" }]);
-export const Download = icon([{ d: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" }, { kind: "line", x1: 12, y1: 3, x2: 12, y2: 15 }, { kind: "polyline", points: "7 10 12 15 17 10" }]);
-export const FileText = icon([{ d: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" }, { kind: "polyline", points: "14 2 14 8 20 8" }, { kind: "line", x1: 8, y1: 13, x2: 16, y2: 13 }, { kind: "line", x1: 8, y1: 17, x2: 16, y2: 17 }]);
-export const FolderEdit = icon([{ d: "M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v5" }, { d: "M4 19h8" }, { d: "m15 19 5-5 2 2-5 5h-2z" }]);
-export const FolderOpen = icon([{ d: "M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v2" }, { d: "M3 19l3-8h16l-3 8z" }]);
-export const FolderTree = icon([{ d: "M4 4h6v6H4z" }, { d: "M14 14h6v6h-6z" }, { d: "M4 14h6v6H4z" }, { d: "M10 7h2v10h2" }, { kind: "line", x1: 12, y1: 17, x2: 10, y2: 17 }]);
-export const Image = icon([{ kind: "rect", x: 3, y: 5, width: 18, height: 14, rx: 2 }, { kind: "circle", cx: 8, cy: 10, r: 1.5 }, { kind: "polyline", points: "21 16 16 11 5 19" }]);
-export const Loader2 = icon([{ d: "M21 12a9 9 0 0 1-9 9" }, { d: "M3 12a9 9 0 0 1 9-9" }]);
-export const Minus = icon([{ kind: "line", x1: 5, y1: 12, x2: 19, y2: 12 }]);
-export const Moon = icon([{ d: "M21 12.8A8 8 0 1 1 11.2 3a6 6 0 0 0 9.8 9.8z" }]);
-export const MoreVertical = icon([{ kind: "circle", cx: 12, cy: 5, r: 1 }, { kind: "circle", cx: 12, cy: 12, r: 1 }, { kind: "circle", cx: 12, cy: 19, r: 1 }]);
-export const Music4 = icon([{ d: "M9 18V5l12-2v13" }, { kind: "circle", cx: 6, cy: 18, r: 3 }, { kind: "circle", cx: 18, cy: 16, r: 3 }]);
-export const Plus = icon([{ kind: "line", x1: 12, y1: 5, x2: 12, y2: 19 }, { kind: "line", x1: 5, y1: 12, x2: 19, y2: 12 }]);
-export const Save = icon([{ d: "M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" }, { kind: "polyline", points: "17 21 17 13 7 13 7 21" }, { kind: "polyline", points: "7 3 7 8 15 8" }]);
-export const Scissors = icon([{ kind: "circle", cx: 6, cy: 6, r: 3 }, { kind: "circle", cx: 6, cy: 18, r: 3 }, { kind: "line", x1: 20, y1: 4, x2: 8.5, y2: 15.5 }, { kind: "line", x1: 14, y1: 14, x2: 20, y2: 20 }, { kind: "line", x1: 8.5, y1: 8.5, x2: 12, y2: 12 }]);
-export const Search = icon([{ kind: "circle", cx: 11, cy: 11, r: 8 }, { kind: "line", x1: 21, y1: 21, x2: 16.65, y2: 16.65 }]);
-export const Sparkles = icon([{ d: "M12 3l1.7 4.3L18 9l-4.3 1.7L12 15l-1.7-4.3L6 9l4.3-1.7z" }, { d: "M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z" }, { d: "M5 3l.8 2.2L8 6l-2.2.8L5 9l-.8-2.2L2 6l2.2-.8z" }]);
-export const Sun = icon([{ kind: "circle", cx: 12, cy: 12, r: 4 }, { kind: "line", x1: 12, y1: 2, x2: 12, y2: 4 }, { kind: "line", x1: 12, y1: 20, x2: 12, y2: 22 }, { kind: "line", x1: 4.93, y1: 4.93, x2: 6.34, y2: 6.34 }, { kind: "line", x1: 17.66, y1: 17.66, x2: 19.07, y2: 19.07 }, { kind: "line", x1: 2, y1: 12, x2: 4, y2: 12 }, { kind: "line", x1: 20, y1: 12, x2: 22, y2: 12 }, { kind: "line", x1: 4.93, y1: 19.07, x2: 6.34, y2: 17.66 }, { kind: "line", x1: 17.66, y1: 6.34, x2: 19.07, y2: 4.93 }]);
-export const Trash2 = icon([{ kind: "polyline", points: "3 6 5 6 21 6" }, { d: "M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" }, { d: "M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" }, { kind: "line", x1: 10, y1: 11, x2: 10, y2: 17 }, { kind: "line", x1: 14, y1: 11, x2: 14, y2: 17 }]);
-export const Type = icon([{ kind: "polyline", points: "4 7 4 4 20 4 20 7" }, { kind: "line", x1: 9, y1: 20, x2: 15, y2: 20 }, { kind: "line", x1: 12, y1: 4, x2: 12, y2: 20 }]);
-export const Upload = icon([{ d: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" }, { kind: "line", x1: 12, y1: 15, x2: 12, y2: 3 }, { kind: "polyline", points: "17 8 12 3 7 8" }]);
-export const Wand2 = icon([{ kind: "line", x1: 15, y1: 4, x2: 20, y2: 9 }, { kind: "line", x1: 4, y1: 20, x2: 14, y2: 10 }, { kind: "line", x1: 13, y1: 5, x2: 19, y2: 11 }, { d: "M5 6l1-2 1 2 2 1-2 1-1 2-1-2-2-1z" }]);
+// Original SVG paths from lucide-static v0.575.0 (ISC), embedded locally to avoid a runtime icon dependency.
+export const ArrowDown = icon(`<path d="M12 5v14" />
+  <path d="m19 12-7 7-7-7" />`);
+export const ArrowRight = icon(`<path d="M5 12h14" />
+  <path d="m12 5 7 7-7 7" />`);
+export const ArrowUp = icon(`<path d="m5 12 7-7 7 7" />
+  <path d="M12 19V5" />`);
+export const ArrowUpDown = icon(`<path d="m21 16-4 4-4-4" />
+  <path d="M17 20V4" />
+  <path d="m3 8 4-4 4 4" />
+  <path d="M7 4v16" />`);
+export const CaseSensitive = icon(`<path d="m2 16 4.039-9.69a.5.5 0 0 1 .923 0L11 16" />
+  <path d="M22 9v7" />
+  <path d="M3.304 13h6.392" />
+  <circle cx="18.5" cy="12.5" r="3.5" />`);
+export const ChevronDown = icon(`<path d="m6 9 6 6 6-6" />`);
+export const ChevronLeft = icon(`<path d="m15 18-6-6 6-6" />`);
+export const ChevronRight = icon(`<path d="m9 18 6-6-6-6" />`);
+export const ChevronsLeft = icon(`<path d="m11 17-5-5 5-5" />
+  <path d="m18 17-5-5 5-5" />`);
+export const ChevronsRight = icon(`<path d="m6 17 5-5-5-5" />
+  <path d="m13 17 5-5-5-5" />`);
+export const Download = icon(`<path d="M12 15V3" />
+  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+  <path d="m7 10 5 5 5-5" />`);
+export const FileText = icon(`<path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z" />
+  <path d="M14 2v5a1 1 0 0 0 1 1h5" />
+  <path d="M10 9H8" />
+  <path d="M16 13H8" />
+  <path d="M16 17H8" />`);
+export const FolderEdit = icon(`<path d="M2 11.5V5a2 2 0 0 1 2-2h3.9c.7 0 1.3.3 1.7.9l.8 1.2c.4.6 1 .9 1.7.9H20a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-9.5" />
+  <path d="M11.378 13.626a1 1 0 1 0-3.004-3.004l-5.01 5.012a2 2 0 0 0-.506.854l-.837 2.87a.5.5 0 0 0 .62.62l2.87-.837a2 2 0 0 0 .854-.506z" />`);
+export const FolderOpen = icon(`<path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2" />`);
+export const FolderTree = icon(`<path d="M20 10a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1h-2.5a1 1 0 0 1-.8-.4l-.9-1.2A1 1 0 0 0 15 3h-2a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1Z" />
+  <path d="M20 21a1 1 0 0 0 1-1v-3a1 1 0 0 0-1-1h-2.9a1 1 0 0 1-.88-.55l-.42-.85a1 1 0 0 0-.92-.6H13a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1Z" />
+  <path d="M3 5a2 2 0 0 0 2 2h3" />
+  <path d="M3 3v13a2 2 0 0 0 2 2h3" />`);
+export const Image = icon(`<rect width="18" height="18" x="3" y="3" rx="2" ry="2" />
+  <circle cx="9" cy="9" r="2" />
+  <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />`);
+export const Loader2 = icon(`<path d="M21 12a9 9 0 1 1-6.219-8.56" />`);
+export const Minus = icon(`<path d="M5 12h14" />`);
+export const Moon = icon(`<path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401" />`);
+export const MoreVertical = icon(`<circle cx="12" cy="12" r="1" />
+  <circle cx="12" cy="5" r="1" />
+  <circle cx="12" cy="19" r="1" />`);
+export const Music4 = icon(`<path d="M9 18V5l12-2v13" />
+  <path d="m9 9 12-2" />
+  <circle cx="6" cy="18" r="3" />
+  <circle cx="18" cy="16" r="3" />`);
+export const Plus = icon(`<path d="M5 12h14" />
+  <path d="M12 5v14" />`);
+export const Save = icon(`<path d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z" />
+  <path d="M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7" />
+  <path d="M7 3v4a1 1 0 0 0 1 1h7" />`);
+export const Scissors = icon(`<circle cx="6" cy="6" r="3" />
+  <path d="M8.12 8.12 12 12" />
+  <path d="M20 4 8.12 15.88" />
+  <circle cx="6" cy="18" r="3" />
+  <path d="M14.8 14.8 20 20" />`);
+export const Search = icon(`<path d="m21 21-4.34-4.34" />
+  <circle cx="11" cy="11" r="8" />`);
+export const Sparkles = icon(`<path d="M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z" />
+  <path d="M20 2v4" />
+  <path d="M22 4h-4" />
+  <circle cx="4" cy="20" r="2" />`);
+export const Sun = icon(`<circle cx="12" cy="12" r="4" />
+  <path d="M12 2v2" />
+  <path d="M12 20v2" />
+  <path d="m4.93 4.93 1.41 1.41" />
+  <path d="m17.66 17.66 1.41 1.41" />
+  <path d="M2 12h2" />
+  <path d="M20 12h2" />
+  <path d="m6.34 17.66-1.41 1.41" />
+  <path d="m19.07 4.93-1.41 1.41" />`);
+export const Trash2 = icon(`<path d="M10 11v6" />
+  <path d="M14 11v6" />
+  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+  <path d="M3 6h18" />
+  <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />`);
+export const Type = icon(`<path d="M12 4v16" />
+  <path d="M4 7V5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v2" />
+  <path d="M9 20h6" />`);
+export const Upload = icon(`<path d="M12 3v12" />
+  <path d="m17 8-5-5-5 5" />
+  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />`);
+export const Wand2 = icon(`<path d="m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72" />
+  <path d="m14 7 3 3" />
+  <path d="M5 6v4" />
+  <path d="M19 14v4" />
+  <path d="M10 2v2" />
+  <path d="M7 8H3" />
+  <path d="M21 16h-4" />
+  <path d="M11 3H9" />`);

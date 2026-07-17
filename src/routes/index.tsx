@@ -1697,22 +1697,22 @@ function EditorPanel({
         />
       </div>
 
-      <div className="flex-1 min-h-0 overflow-auto px-3 pb-3 space-y-1.5">
+      <div className="flex-1 min-h-0 overflow-auto px-2.5 pb-2.5 space-y-1">
         {FIELDS.map((f) =>
           f.key === "comment" ? (
-            <div key={f.key} className="space-y-0.5">
-              <Label className="text-[11px] text-muted-foreground">{f.label}</Label>
+            <div key={f.key} className="space-y-px">
+              <Label className="text-[11px] leading-none text-foreground">{f.label}</Label>
               <Textarea
                 disabled={count === 0}
                 value={tags.comment === MULTI ? "" : tags.comment}
                 placeholder={tags.comment === MULTI ? "<multiple values>" : ""}
                 onChange={(e) => onChange("comment", e.target.value)}
-                className="min-h-[38px] bg-white px-2 py-1 text-xs text-black shadow-none focus-visible:bg-white"
+                className="min-h-[32px] rounded-[1px] border-[#9a9a9a] bg-white px-1.5 py-0.5 text-[11px] leading-4 text-black shadow-none focus-visible:bg-white focus-visible:ring-0 focus-visible:border-primary"
               />
             </div>
           ) : (
-            <div key={f.key} className="space-y-0.5">
-              <Label className="text-[11px] text-muted-foreground">{f.label}</Label>
+            <div key={f.key} className="space-y-px">
+              <Label className="text-[11px] leading-none text-foreground">{f.label}</Label>
               <TagFieldCombo
                 disabled={count === 0}
                 value={tags[f.key]}
@@ -1767,7 +1767,7 @@ function TagFieldCombo({
         value={isMulti ? "" : value}
         placeholder={isMulti ? "<keep>" : ""}
         onChange={(e) => onChange(e.target.value)}
-        className="h-5 rounded-sm border-border/80 bg-white px-1.5 pr-6 text-[11px] leading-none text-black shadow-none focus-visible:bg-white"
+        className="h-[22px] rounded-[1px] border-[#9a9a9a] bg-white px-1.5 py-0 pr-6 text-[11px] leading-none text-black shadow-none focus-visible:bg-white focus-visible:ring-0 focus-visible:border-primary"
       />
       <button
         type="button"
