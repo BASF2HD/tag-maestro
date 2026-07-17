@@ -763,7 +763,7 @@ function TagMaestro() {
         </div>
 
         <div className="ml-auto flex items-center gap-2">
-          {busy && (
+          {busy && !importProgress && (
             <span className="text-xs text-muted-foreground flex items-center gap-1.5">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
               {busy}
@@ -899,14 +899,64 @@ function TagMaestro() {
 }
 
 function ImportProgressPanel({ progress }: { progress: ImportProgress | null }) {
+  const panelRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<{ dx: number; dy: number; width: number; height: number } | null>(null);
+  const [position, setPosition] = useState<{ x: number; y: number } | null>(null);
   const hasProgress = typeof progress?.loaded === "number" && typeof progress.total === "number";
   const percent = hasProgress && progress.total ? Math.round((progress.loaded! / progress.total) * 100) : 0;
 
   if (!progress) return null;
 
+  const startDrag = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    const rect = panelRef.current?.getBoundingClientRect();
+    if (!rect) return;
+
+    dragRef.current = {
+      dx: e.clientX - rect.left,
+      dy: e.clientY - rect.top,
+      width: rect.width,
+      height: rect.height,
+    };
+    setPosition({ x: rect.left, y: rect.top });
+    e.currentTarget.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  };
+
+  const moveDrag = (e: React.PointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    if (!drag) return;
+
+    const margin = 8;
+    const maxX = Math.max(margin, window.innerWidth - drag.width - margin);
+    const maxY = Math.max(margin, window.innerHeight - drag.height - margin);
+    const x = Math.min(Math.max(margin, e.clientX - drag.dx), maxX);
+    const y = Math.min(Math.max(margin, e.clientY - drag.dy), maxY);
+    setPosition({ x, y });
+  };
+
+  const stopDrag = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragRef.current) return;
+    dragRef.current = null;
+    e.currentTarget.releasePointerCapture(e.pointerId);
+  };
+
   return (
-    <div className="pointer-events-none fixed bottom-3 right-3 z-50 w-[min(340px,calc(100vw-24px))] rounded-md border border-border bg-background p-3 text-foreground shadow-sm">
-      <div className="flex items-center gap-2 text-sm font-medium">
+    <div
+      ref={panelRef}
+      className={`fixed z-50 w-[min(340px,calc(100vw-24px))] rounded-md border border-border bg-background p-3 text-foreground shadow-sm ${
+        position ? "" : "bottom-3 right-3"
+      }`}
+      style={position ? { left: position.x, top: position.y } : undefined}
+    >
+      <div
+        className="flex cursor-move touch-none select-none items-center gap-2 text-sm font-medium"
+        title="Drag to move"
+        onPointerDown={startDrag}
+        onPointerMove={moveDrag}
+        onPointerUp={stopDrag}
+        onPointerCancel={stopDrag}
+      >
         <Loader2 className="h-4 w-4 animate-spin text-primary" />
         {progress.title}
       </div>
