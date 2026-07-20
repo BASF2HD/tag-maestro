@@ -1196,6 +1196,7 @@ function FileTable({
   // Drag and drop states
   const [draggedCol, setDraggedCol] = useState<TableColumnKey | null>(null);
   const [dragOverCol, setDragOverCol] = useState<TableColumnKey | null>(null);
+  const [resizingCol, setResizingCol] = useState<TableColumnKey | null>(null);
   const [isDragging, setIsDragging] = useState(false);
 
   function handleDragStart(e: React.DragEvent, key: TableColumnKey) {
@@ -1424,6 +1425,7 @@ function FileTable({
     const startX = startEvent.clientX;
     const startWidth = columnWidths[key] || defaultWidths[key] || 150;
     let lastWidth = startWidth;
+    setResizingCol(key);
 
     function handleMouseMove(moveEvent: MouseEvent) {
       const deltaX = moveEvent.clientX - startX;
@@ -1435,6 +1437,7 @@ function FileTable({
     function handleMouseUp() {
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
+      setResizingCol(null);
       // Persist the final width to React state
       setColumnWidths((prev) => ({
         ...prev,
@@ -1535,6 +1538,7 @@ function FileTable({
                 };
                 const isOver = dragOverCol === col.key;
                 const isDragged = draggedCol === col.key;
+                const isResizing = resizingCol === col.key;
                 return (
                   <th
                     key={col.key}
@@ -1578,8 +1582,14 @@ function FileTable({
                     <div
                       onMouseDown={(e) => handleResizeStart(col.key, e)}
                       onClick={(e) => e.stopPropagation()}
-                      className="absolute right-0 top-0 bottom-0 z-20 w-3 -mr-1.5 cursor-col-resize"
-                    />
+                      className="group/resize absolute right-0 top-0 bottom-0 z-20 w-3 -mr-1.5 cursor-col-resize"
+                    >
+                      <span
+                        className={`absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-slate-500 dark:bg-primary ${
+                          isResizing ? "opacity-100" : "opacity-0 group-hover/resize:opacity-100"
+                        }`}
+                      />
+                    </div>
                   </th>
                 );
               })}
