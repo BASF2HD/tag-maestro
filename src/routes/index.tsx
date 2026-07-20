@@ -1543,7 +1543,7 @@ function FileTable({
                     className={`relative group h-[19px] select-none py-0 text-left font-semibold text-slate-700 dark:text-foreground/80 ${
                       col.key !== "cover" ? "cursor-grab active:cursor-grabbing hover:bg-slate-200/70 dark:hover:bg-accent/30" : ""
                     } ${
-                      isOver ? "border-l-2 border-l-primary pl-1.5 pr-2" : "px-2"
+                      isOver ? "bg-slate-200/70 px-2 dark:bg-accent/30" : "px-2"
                     } ${
                       isDragged ? "bg-slate-200 opacity-40 dark:bg-accent/20" : ""
                     } ${col.className ?? ""}`}
@@ -1569,14 +1569,12 @@ function FileTable({
                         </span>
                       )}
                     </div>
-                    {/* Resize handle: wide invisible hit area + visible colored strip */}
+                    {/* Invisible resize handle keeps resizing available without header separator lines. */}
                     <div
                       onMouseDown={(e) => handleResizeStart(col.key, e)}
                       onClick={(e) => e.stopPropagation()}
-                      className="absolute right-0 top-0 bottom-0 w-3 -mr-1.5 cursor-col-resize z-20 flex items-center justify-center"
-                    >
-                      <div className="h-full w-0.5 rounded-full bg-slate-300 group-hover:bg-primary/60 dark:bg-border/30" />
-                    </div>
+                      className="absolute right-0 top-0 bottom-0 z-20 w-3 -mr-1.5 cursor-col-resize"
+                    />
                   </th>
                 );
               })}
