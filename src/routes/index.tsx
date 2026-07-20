@@ -154,6 +154,18 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
 }
 
+function getSavedEditorWidth() {
+  if (typeof window === "undefined") return EDITOR_DEFAULT_WIDTH;
+  try {
+    const saved = Number(window.localStorage.getItem("editorWidth"));
+    return Number.isFinite(saved)
+      ? clamp(saved, EDITOR_MIN_WIDTH, EDITOR_MAX_WIDTH)
+      : EDITOR_DEFAULT_WIDTH;
+  } catch {
+    return EDITOR_DEFAULT_WIDTH;
+  }
+}
+
 function getSavedTheme(): "light" | "dark" {
   if (typeof window === "undefined") return "light";
   try {
@@ -249,18 +261,11 @@ function TagMaestro() {
   const [filter, setFilter] = useState("");
   const [folderRenameOpen, setFolderRenameOpen] = useState(false);
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
-  const [editorWidth, setEditorWidth] = useState(EDITOR_DEFAULT_WIDTH);
+  const [editorWidth, setEditorWidth] = useState(getSavedEditorWidth);
   const fileInput = useRef<HTMLInputElement>(null);
   const folderInput = useRef<HTMLInputElement>(null);
   const rootFolderInput = useRef<HTMLInputElement>(null);
   const coverProbeIds = useRef<Set<string>>(new Set());
-
-  useEffect(() => {
-    const saved = Number(localStorage.getItem("editorWidth"));
-    if (Number.isFinite(saved)) {
-      setEditorWidth(clamp(saved, EDITOR_MIN_WIDTH, EDITOR_MAX_WIDTH));
-    }
-  }, []);
 
   const parseFilename = useServerFn(aiParseFilename);
   const identify = useServerFn(aiIdentify);
