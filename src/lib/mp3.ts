@@ -64,6 +64,10 @@ export interface Mp3File {
   id: string;
   file: File;
   sourceHandle?: FileSystemFileHandle;
+  sourceDirectoryHandle?: FileSystemDirectoryHandle;
+  /** Persisted root-folder source used to restore this row after a refresh. */
+  librarySourceId?: string;
+  libraryRelativePath?: string;
   format: AudioFormat;
   tags: Mp3Tags;
   meta: FileMeta;
@@ -206,6 +210,7 @@ export async function readMp3(
   skipAudioDecode?: boolean,
   readEmbeddedCover = true,
   sourceHandle?: FileSystemFileHandle,
+  sourceDirectoryHandle?: FileSystemDirectoryHandle,
 ): Promise<Mp3File> {
   const format = detectFormat(file);
   const tags =
@@ -231,6 +236,7 @@ export async function readMp3(
     id: crypto.randomUUID(),
     file,
     sourceHandle,
+    sourceDirectoryHandle,
     format,
     tags,
     meta,

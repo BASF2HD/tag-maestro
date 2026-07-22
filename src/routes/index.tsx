@@ -33,6 +33,8 @@ import {
   Sun,
   Moon,
   ChevronDown,
+  Type,
+  Trash2,
 } from "@/components/icons";
 import {
   readMp3,
@@ -56,6 +58,18 @@ import {
 } from "@/lib/ai.functions";
 import { FolderRenameDialog } from "@/components/FolderRenameDialog";
 import { BulkFieldEditDialog, type BulkFieldKey } from "@/components/BulkFieldEditDialog";
+import {
+  TagConverterDialog,
+  type ConverterPatch,
+} from "@/components/TagConverterDialog";
+import {
+  clearLibrarySources,
+  excludeLibraryPaths,
+  listLibrarySources,
+  removeLibrarySource,
+  saveLibrarySource,
+  type StoredLibrarySource,
+} from "@/lib/library-storage";
 
 export const Route = createFileRoute("/")({
   component: TagMaestro,
@@ -88,16 +102,33 @@ type FolderFileEntry = {
   file: File;
   relativePath: string;
   handle?: FileSystemFileHandle;
+  parentHandle?: FileSystemDirectoryHandle;
+  libraryPath?: string;
 };
 
 type DirectoryPickerWindow = Window & {
   showDirectoryPicker?: (options?: { mode?: "read" | "readwrite" }) => Promise<FileSystemDirectoryHandle>;
+  showOpenFilePicker?: (options?: {
+    multiple?: boolean;
+  }) => Promise<FileSystemFileHandle[]>;
 };
 
 type WritableFileHandle = FileSystemFileHandle & {
   createWritable: () => Promise<FileSystemWritableFileStream>;
   queryPermission?: (descriptor?: { mode?: "read" | "readwrite" }) => Promise<PermissionState>;
   requestPermission?: (descriptor?: { mode?: "read" | "readwrite" }) => Promise<PermissionState>;
+};
+
+type PermissionedHandle = FileSystemHandle & {
+  isSameEntry?: (other: FileSystemHandle) => Promise<boolean>;
+  queryPermission?: (descriptor?: { mode?: "read" | "readwrite" }) => Promise<PermissionState>;
+  requestPermission?: (descriptor?: { mode?: "read" | "readwrite" }) => Promise<PermissionState>;
+};
+
+type LoadOptions = {
+  sourceId?: string;
+  silent?: boolean;
+  generation?: number;
 };
 
 const FIELDS: { key: TagKey; label: string }[] = [
@@ -208,7 +239,7 @@ async function collectDirectoryEntries(
       } else if (child.kind === "file") {
         const fileHandle = child as FileSystemFileHandle;
         const file = await fileHandle.getFile();
-        entries.push({ file, relativePath, handle: fileHandle });
+        entries.push({ file, relativePath, handle: fileHandle, parentHandle: handle });
       }
     }
   }
@@ -227,6 +258,16 @@ async function ensureWritePermission(handle: WritableFileHandle): Promise<boolea
     return (await handle.requestPermission(descriptor)) === "granted";
   }
   return true;
+}
+
+async function handlePermission(
+  handle: PermissionedHandle,
+  requestAccess: boolean,
+): Promise<PermissionState> {
+  const descriptor = { mode: "readwrite" as const };
+  const current = handle.queryPermission ? await handle.queryPermission(descriptor) : "granted";
+  if (current !== "prompt" || !requestAccess || !handle.requestPermission) return current;
+  return handle.requestPermission(descriptor);
 }
 
 function cloneTags(t: Mp3Tags): Mp3Tags {
@@ -261,11 +302,15 @@ function TagMaestro() {
   const [filter, setFilter] = useState("");
   const [folderRenameOpen, setFolderRenameOpen] = useState(false);
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
+  const [converterOpen, setConverterOpen] = useState(false);
+  const [pendingLibrarySources, setPendingLibrarySources] = useState<StoredLibrarySource[]>([]);
   const [editorWidth, setEditorWidth] = useState(getSavedEditorWidth);
   const fileInput = useRef<HTMLInputElement>(null);
   const folderInput = useRef<HTMLInputElement>(null);
   const rootFolderInput = useRef<HTMLInputElement>(null);
   const coverProbeIds = useRef<Set<string>>(new Set());
+  const libraryRestoreStarted = useRef(false);
+  const libraryLoadGeneration = useRef(0);
 
   const parseFilename = useServerFn(aiParseFilename);
   const identify = useServerFn(aiIdentify);
@@ -287,7 +332,14 @@ function TagMaestro() {
 
     coverProbeIds.current.add(first.id);
     let cancelled = false;
-    void readMp3(first.file, first.meta.path || first.file.name, true, true, first.sourceHandle).then((loaded) => {
+    void readMp3(
+      first.file,
+      first.meta.path || first.file.name,
+      true,
+      true,
+      first.sourceHandle,
+      first.sourceDirectoryHandle,
+    ).then((loaded) => {
       const cover = loaded.tags.cover;
       if (cancelled || !cover) return;
       setFiles((prev) =>
@@ -322,9 +374,14 @@ function TagMaestro() {
     );
   }, [files, filter]);
 
-  const handleAdd = useCallback(async (list: FileList | File[]) => {
-    const arr = Array.from(list).filter((f) => {
-      const n = f.name.toLowerCase();
+  const handleAdd = useCallback(async (
+    list: FileList | File[] | FolderFileEntry[],
+    options: LoadOptions = {},
+  ) => {
+    const source = list as ArrayLike<File | FolderFileEntry>;
+    const entries = Array.from({ length: list.length }, (_, index) => asFolderEntry(source[index]));
+    const arr = entries.filter((entry) => {
+      const n = entry.file.name.toLowerCase();
       return SUPPORTED_EXTS.some((ext) => n.endsWith(ext));
     });
     if (!arr.length) {
@@ -334,21 +391,106 @@ function TagMaestro() {
     setBusy(`Reading ${arr.length} file${arr.length > 1 ? "s" : ""}…`);
     try {
       const skipAudio = arr.length > 10;
-      const loaded = await Promise.all(arr.map((f) => readMp3(f, undefined, skipAudio)));
-      setFiles((prev) => [...prev, ...loaded]);
-      toast.success(`Loaded ${loaded.length} file${loaded.length > 1 ? "s" : ""}`);
+      const loaded = await Promise.all(
+        arr.map(async (entry) => ({
+          ...(await readMp3(
+            entry.file,
+            entry.relativePath,
+            skipAudio,
+            true,
+            entry.handle,
+            entry.parentHandle,
+          )),
+          librarySourceId: options.sourceId,
+          libraryRelativePath: options.sourceId
+            ? (entry.libraryPath ?? entry.relativePath)
+            : undefined,
+        })),
+      );
+      if (
+        options.generation !== undefined &&
+        options.generation !== libraryLoadGeneration.current
+      ) {
+        return 0;
+      }
+      setFiles((prev) => {
+        if (!options.sourceId) return [...prev, ...loaded];
+        const existingPaths = new Set(
+          prev
+            .filter((file) => file.librarySourceId === options.sourceId)
+            .map((file) => file.libraryRelativePath),
+        );
+        return [
+          ...prev,
+          ...loaded.filter((file) => !existingPaths.has(file.libraryRelativePath)),
+        ];
+      });
+      if (!options.silent) {
+        toast.success(`Loaded ${loaded.length} file${loaded.length > 1 ? "s" : ""}`);
+      }
+      return loaded.length;
     } finally {
       setBusy(null);
     }
   }, []);
 
-  const onDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    if (e.dataTransfer.files) void handleAdd(e.dataTransfer.files);
-  };
+  const loadFileHandles = useCallback(async (handles: FileSystemFileHandle[]) => {
+    let sourceId: string | undefined;
+    try {
+      if (!handles.length) return;
+      sourceId = crypto.randomUUID();
+      const source: StoredLibrarySource = {
+        id: sourceId,
+        kind: "files",
+        name: handles.length === 1 ? handles[0].name : `${handles.length} selected files`,
+        handles,
+        excludedPaths: [],
+        addedAt: Date.now(),
+      };
+      await saveLibrarySource(source);
+      const entries = await Promise.all(
+        handles.map(async (handle, index) => ({
+          file: await handle.getFile(),
+          relativePath: handle.name,
+          libraryPath: `${index}:${handle.name}`,
+          handle,
+        })),
+      );
+      const loaded = await handleAdd(entries, {
+        sourceId,
+        generation: libraryLoadGeneration.current,
+      });
+      if (!loaded) await removeLibrarySource(sourceId);
+    } catch (error) {
+      if (sourceId) await removeLibrarySource(sourceId).catch(() => undefined);
+      if ((error as { name?: string })?.name !== "AbortError") {
+        toast.error((error as { message?: string })?.message || "File open failed");
+      }
+      setBusy(null);
+    }
+  }, [handleAdd]);
+
+  const openFilePicker = useCallback(async () => {
+    const picker = (window as DirectoryPickerWindow).showOpenFilePicker;
+    if (!picker) {
+      fileInput.current?.click();
+      return;
+    }
+    try {
+      const handles = await picker.call(window, { multiple: true });
+      await loadFileHandles(handles);
+    } catch (error) {
+      if ((error as { name?: string })?.name !== "AbortError") {
+        toast.error((error as { message?: string })?.message || "File open failed");
+      }
+    }
+  }, [loadFileHandles]);
 
   /** Handle adding files from a folder picker (single folder or root with subfolders). */
-  const handleAddFolder = useCallback(async (list: FileList | File[] | FolderFileEntry[]) => {
+  const handleAddFolder = useCallback(async (
+    list: FileList | File[] | FolderFileEntry[],
+    options: LoadOptions = {},
+  ) => {
     const pickedCount = list.length;
     const source = list as ArrayLike<File | FolderFileEntry>;
     const pauseForPaint = () => new Promise<void>((resolve) => window.setTimeout(resolve, 0));
@@ -391,8 +533,8 @@ function TagMaestro() {
     if (!audioFiles.length) {
       setImportProgress(null);
       setBusy(null);
-      toast.error("No supported audio files found in folder");
-      return;
+      if (!options.silent) toast.error("No supported audio files found in folder");
+      return 0;
     }
 
     // Process audio files in batches for smooth progress
@@ -409,11 +551,28 @@ function TagMaestro() {
     });
     try {
       for (let i = 0; i < total; i += BATCH) {
+        if (
+          options.generation !== undefined &&
+          options.generation !== libraryLoadGeneration.current
+        ) {
+          break;
+        }
         const batch = audioFiles.slice(i, i + BATCH);
         const loaded = await Promise.all(
-          batch.map((entry) => {
-            return readMp3(entry.file, entry.relativePath, true, false, entry.handle);
-          }),
+          batch.map(async (entry) => ({
+            ...(await readMp3(
+              entry.file,
+              entry.relativePath,
+              true,
+              false,
+              entry.handle,
+              entry.parentHandle,
+            )),
+            librarySourceId: options.sourceId,
+            libraryRelativePath: options.sourceId
+              ? (entry.libraryPath ?? entry.relativePath)
+              : undefined,
+          })),
         );
 
         // Auto-assign cover art from /cover/ subfolders
@@ -444,7 +603,18 @@ function TagMaestro() {
           }
         }
 
-        setFiles((prev) => [...prev, ...loaded]);
+        setFiles((prev) => {
+          if (!options.sourceId) return [...prev, ...loaded];
+          const existingPaths = new Set(
+            prev
+              .filter((file) => file.librarySourceId === options.sourceId)
+              .map((file) => file.libraryRelativePath),
+          );
+          return [
+            ...prev,
+            ...loaded.filter((file) => !existingPaths.has(file.libraryRelativePath)),
+          ];
+        });
         loadedCount += loaded.length;
         setBusy(`Reading files… ${loadedCount}/${total}`);
         setImportProgress({
@@ -455,12 +625,58 @@ function TagMaestro() {
         });
         await pauseForPaint();
       }
-      toast.success(`Loaded ${loadedCount} file${loadedCount > 1 ? "s" : ""} from folder`);
+      if (!options.silent) {
+        toast.success(`Loaded ${loadedCount} file${loadedCount > 1 ? "s" : ""} from folder`);
+      }
     } finally {
       setBusy(null);
       setImportProgress(null);
     }
+    return loadedCount;
   }, []);
+
+  const loadDirectoryHandle = useCallback(async (
+    directoryHandle: FileSystemDirectoryHandle,
+  ) => {
+    try {
+      const savedSources = (await listLibrarySources()).filter(
+        (source): source is Extract<StoredLibrarySource, { kind: "directory" }> =>
+          source.kind === "directory",
+      );
+      const permissionedHandle = directoryHandle as PermissionedHandle;
+      let previousSource: StoredLibrarySource | undefined;
+      if (permissionedHandle.isSameEntry) {
+        for (const candidate of savedSources) {
+          if (await permissionedHandle.isSameEntry(candidate.handle)) {
+            previousSource = candidate;
+            break;
+          }
+        }
+      }
+      const source: StoredLibrarySource = {
+        id: previousSource?.id ?? crypto.randomUUID(),
+        kind: "directory",
+        name: directoryHandle.name,
+        handle: directoryHandle,
+        excludedPaths: [],
+        addedAt: previousSource?.addedAt ?? Date.now(),
+      };
+      await saveLibrarySource(source);
+      setPendingLibrarySources((prev) => prev.filter((item) => item.id !== source.id));
+      setFiles((prev) => prev.filter((file) => file.librarySourceId !== source.id));
+      setBusy("Opening folder…");
+      const generation = libraryLoadGeneration.current;
+      const entries = await collectDirectoryEntries(directoryHandle);
+      const loaded = await handleAddFolder(entries, { sourceId: source.id, generation });
+      if (!loaded) await removeLibrarySource(source.id);
+    } catch (e: any) {
+      if (e?.name !== "AbortError") {
+        toast.error(e?.message || "Folder open failed");
+      }
+      setBusy(null);
+      setImportProgress(null);
+    }
+  }, [handleAddFolder]);
 
   const openFolderPicker = useCallback(async (fallbackInput: HTMLInputElement | null) => {
     const picker = (window as DirectoryPickerWindow).showDirectoryPicker;
@@ -471,17 +687,135 @@ function TagMaestro() {
 
     try {
       const directoryHandle = await picker.call(window, { mode: "readwrite" });
-      setBusy("Opening folder…");
-      const entries = await collectDirectoryEntries(directoryHandle);
-      await handleAddFolder(entries);
-    } catch (e: any) {
-      if (e?.name !== "AbortError") {
-        toast.error(e?.message || "Folder open failed");
+      await loadDirectoryHandle(directoryHandle);
+    } catch (error) {
+      if ((error as { name?: string })?.name !== "AbortError") {
+        toast.error((error as { message?: string })?.message || "Folder open failed");
       }
-      setBusy(null);
-      setImportProgress(null);
     }
-  }, [handleAddFolder]);
+  }, [loadDirectoryHandle]);
+
+  async function onDrop(event: React.DragEvent) {
+    event.preventDefault();
+    const items = Array.from(event.dataTransfer.items) as Array<
+      DataTransferItem & {
+        getAsFileSystemHandle?: () => Promise<FileSystemHandle | null>;
+      }
+    >;
+    const handleItems = items.filter(
+      (item) => item.kind === "file" && item.getAsFileSystemHandle,
+    );
+
+    if (handleItems.length) {
+      try {
+        const handles = (await Promise.all(
+          handleItems.map((item) => item.getAsFileSystemHandle!()),
+        )).filter((handle): handle is FileSystemHandle => Boolean(handle));
+        const directories = handles.filter(
+          (handle): handle is FileSystemDirectoryHandle => handle.kind === "directory",
+        );
+        const droppedFiles = handles.filter(
+          (handle): handle is FileSystemFileHandle => handle.kind === "file",
+        );
+        for (const directory of directories) await loadDirectoryHandle(directory);
+        if (droppedFiles.length) await loadFileHandles(droppedFiles);
+        if (handles.length) return;
+      } catch (error) {
+        toast.error((error as { message?: string })?.message || "Dropped items could not be opened");
+        return;
+      }
+    }
+
+    if (event.dataTransfer.files.length) {
+      await handleAdd(event.dataTransfer.files);
+    }
+  }
+
+  const restoreLibrarySources = useCallback(async (
+    sources: StoredLibrarySource[],
+    requestAccess: boolean,
+  ) => {
+    if (!sources.length) return;
+    const restoreGeneration = libraryLoadGeneration.current;
+    const stillPending: StoredLibrarySource[] = [];
+    let restoredFiles = 0;
+
+    for (const source of sources) {
+      if (restoreGeneration !== libraryLoadGeneration.current) return;
+      try {
+        setBusy(`Restoring ${source.name}…`);
+        const excluded = new Set(source.excludedPaths);
+        if (source.kind === "directory") {
+          const permission = await handlePermission(
+            source.handle as PermissionedHandle,
+            requestAccess,
+          );
+          if (permission !== "granted") {
+            stillPending.push(source);
+            continue;
+          }
+          const entries = (await collectDirectoryEntries(source.handle)).filter(
+            (entry) => !excluded.has(entry.relativePath),
+          );
+          restoredFiles += await handleAddFolder(entries, {
+            sourceId: source.id,
+            silent: true,
+            generation: restoreGeneration,
+          });
+        } else {
+          const entries: FolderFileEntry[] = [];
+          let needsPermission = false;
+          for (let index = 0; index < source.handles.length; index++) {
+            const handle = source.handles[index];
+            const libraryPath = `${index}:${handle.name}`;
+            if (excluded.has(libraryPath)) continue;
+            const permission = await handlePermission(handle as PermissionedHandle, requestAccess);
+            if (permission !== "granted") {
+              needsPermission = true;
+              break;
+            }
+            entries.push({
+              file: await handle.getFile(),
+              relativePath: handle.name,
+              libraryPath,
+              handle,
+            });
+          }
+          if (needsPermission) {
+            stillPending.push(source);
+            continue;
+          }
+          restoredFiles += await handleAdd(entries, {
+            sourceId: source.id,
+            silent: true,
+            generation: restoreGeneration,
+          });
+        }
+      } catch {
+        stillPending.push(source);
+      }
+    }
+
+    if (restoreGeneration !== libraryLoadGeneration.current) return;
+    setPendingLibrarySources(stillPending);
+    setBusy(null);
+    setImportProgress(null);
+    if (restoredFiles > 0) {
+      toast.success(
+        `Restored ${restoredFiles.toLocaleString()} file${restoredFiles === 1 ? "" : "s"}`,
+      );
+    } else if (requestAccess && stillPending.length) {
+      toast.error("Folder access was not granted. Your saved library is still available to restore.");
+    }
+  }, [handleAdd, handleAddFolder]);
+
+  useEffect(() => {
+    if (libraryRestoreStarted.current) return;
+    libraryRestoreStarted.current = true;
+    void listLibrarySources()
+      .then((sources) => restoreLibrarySources(sources, false))
+      .catch(() => toast.error("Could not read the saved library"));
+  }, [restoreLibrarySources]);
 
   /** Update folder name for a single file, propagating to all files in the same original folder. */
   function updateFolderName(id: string, newName: string) {
@@ -519,6 +853,22 @@ function TagMaestro() {
       }),
     );
     toast.success(`Updated ${changes.size} file${changes.size > 1 ? "s" : ""}`);
+  }
+
+  function handleConvert(changes: Map<string, ConverterPatch>) {
+    setFiles((prev) =>
+      prev.map((file) => {
+        const patch = changes.get(file.id);
+        if (!patch) return file;
+        return {
+          ...file,
+          tags: patch.tags ? { ...file.tags, ...patch.tags } : file.tags,
+          renamedBase: patch.renamedBase ?? file.renamedBase,
+          dirty: true,
+        };
+      }),
+    );
+    toast.success(`Converted ${changes.size} file${changes.size === 1 ? "" : "s"}`);
   }
 
   /** Map of folder name -> array of file IDs for the rename dialog. */
@@ -560,15 +910,56 @@ function TagMaestro() {
     );
   }
 
-  function removeSelected() {
-    setFiles((prev) => prev.filter((f) => !selected.has(f.id)));
+  async function removeSelected() {
+    const removed = files.filter((file) => selected.has(file.id));
+    const remaining = files.filter((file) => !selected.has(file.id));
+    setFiles(remaining);
     setSelected(new Set());
+
+    const pathsBySource = new Map<string, string[]>();
+    for (const file of removed) {
+      if (!file.librarySourceId || !file.libraryRelativePath) continue;
+      const paths = pathsBySource.get(file.librarySourceId) ?? [];
+      paths.push(file.libraryRelativePath);
+      pathsBySource.set(file.librarySourceId, paths);
+    }
+
+    try {
+      for (const [sourceId, paths] of pathsBySource) {
+        const sourceStillLoaded = remaining.some((file) => file.librarySourceId === sourceId);
+        if (sourceStillLoaded) await excludeLibraryPaths(sourceId, paths);
+        else await removeLibrarySource(sourceId);
+      }
+    } catch {
+      toast.error("Rows were removed, but the saved library could not be updated");
+    }
+  }
+
+  async function removeAll() {
+    if (!window.confirm("Remove all loaded files from TagMaestro? Files on disk will not be deleted.")) {
+      return;
+    }
+    libraryLoadGeneration.current += 1;
+    setFiles([]);
+    setSelected(new Set());
+    setPendingLibrarySources([]);
+    coverProbeIds.current.clear();
+    try {
+      await clearLibrarySources();
+      toast.success("Removed all loaded files");
+    } catch {
+      toast.error("Files were removed, but saved library storage could not be cleared");
+    }
   }
 
   async function saveAll() {
     const targets = selectedFiles.length ? selectedFiles : files;
     if (!targets.length) return;
-    const canSaveDirect = targets.every((m) => m.sourceHandle);
+    const canSaveDirect = targets.every((m) => {
+      if (!m.sourceHandle) return false;
+      const targetName = directSaveFilename(m);
+      return targetName === m.file.name || Boolean(m.sourceDirectoryHandle);
+    });
     setBusy(
       canSaveDirect
         ? `Saving ${targets.length} file${targets.length > 1 ? "s" : ""} directly…`
@@ -577,17 +968,56 @@ function TagMaestro() {
     try {
       if (canSaveDirect) {
         let saved = 0;
-        const savedFiles = new Map<string, File>();
+        const savedFiles = new Map<
+          string,
+          { file: File; handle: FileSystemFileHandle; relativePath?: string }
+        >();
         for (const m of targets) {
-          const handle = m.sourceHandle as WritableFileHandle;
-          const allowed = await ensureWritePermission(handle);
+          const originalHandle = m.sourceHandle as WritableFileHandle;
+          const allowed = await ensureWritePermission(originalHandle);
           if (!allowed) throw new Error("Write permission was not granted for the selected folder");
 
           const blob = await writeTagsToBlob(m);
-          const writable = await handle.createWritable();
+          const targetName = directSaveFilename(m);
+          const shouldRename = targetName !== m.file.name;
+          let targetHandle = originalHandle;
+
+          if (shouldRename) {
+            const directory = m.sourceDirectoryHandle;
+            if (!directory) {
+              throw new Error("Open the containing folder to rename files directly");
+            }
+            try {
+              const existing = await directory.getFileHandle(targetName);
+              const sameEntry = (existing as PermissionedHandle).isSameEntry
+                ? await (existing as PermissionedHandle).isSameEntry!(originalHandle)
+                : false;
+              if (sameEntry) {
+                throw new Error("Case-only filename changes are not supported by this filesystem");
+              }
+              throw new Error("A file named \"" + targetName + "\" already exists");
+            } catch (error) {
+              if ((error as { name?: string }).name !== "NotFoundError") throw error;
+            }
+            targetHandle = await directory.getFileHandle(targetName, {
+              create: true,
+            }) as WritableFileHandle;
+          }
+
+          const writable = await targetHandle.createWritable();
           await writable.write(blob);
           await writable.close();
-          savedFiles.set(m.id, await handle.getFile());
+          if (shouldRename) {
+            await m.sourceDirectoryHandle!.removeEntry(m.file.name);
+          }
+          const relativePath = m.libraryRelativePath
+            ? replacePathFilename(m.libraryRelativePath, targetName)
+            : undefined;
+          savedFiles.set(m.id, {
+            file: await targetHandle.getFile(),
+            handle: targetHandle,
+            relativePath,
+          });
           saved += 1;
           setBusy(`Saving directly… ${saved}/${targets.length}`);
         }
@@ -598,7 +1028,18 @@ function TagMaestro() {
             savedIds.has(f.id)
               ? {
                   ...f,
-                  file: savedFiles.get(f.id) || f.file,
+                  file: savedFiles.get(f.id)?.file || f.file,
+                  sourceHandle: savedFiles.get(f.id)?.handle || f.sourceHandle,
+                  libraryRelativePath:
+                    savedFiles.get(f.id)?.relativePath ?? f.libraryRelativePath,
+                  meta: {
+                    ...f.meta,
+                    path: replacePathFilename(
+                      f.meta.path,
+                      savedFiles.get(f.id)?.file.name || f.file.name,
+                    ),
+                  },
+                  renamedBase: undefined,
                   dirty: false,
                   original: cloneTags(f.tags),
                 }
@@ -833,6 +1274,12 @@ function TagMaestro() {
         files={selectedFiles.length ? selectedFiles : files}
         onApply={handleBulkFieldEdit}
       />
+      <TagConverterDialog
+        open={converterOpen}
+        onOpenChange={setConverterOpen}
+        files={selectedFiles.length ? selectedFiles : files}
+        onApply={handleConvert}
+      />
       <ImportProgressPanel progress={importProgress} />
 
       {/* Header */}
@@ -870,34 +1317,85 @@ function TagMaestro() {
           {...{ webkitdirectory: "", directory: "", multiple: true }}
           onChange={(e) => e.target.files && handleAddFolder(e.target.files)}
         />
-        <Button size="sm" onClick={() => fileInput.current?.click()}>
-          <Upload className="mr-1.5 h-4 w-4" />
-          Add files
-        </Button>
-        <Button size="sm" variant="outline" onClick={() => void openFolderPicker(folderInput.current)}>
-          <FolderOpen className="mr-1.5 h-4 w-4" />
-          Add Folder
-        </Button>
-        <Button size="sm" variant="outline" onClick={() => void openFolderPicker(rootFolderInput.current)}>
-          <FolderTree className="mr-1.5 h-4 w-4" />
-          Add Root Folder
-        </Button>
+        <div className="hidden items-center gap-2 lg:flex">
+          <Button size="sm" onClick={() => void openFilePicker()}>
+            <Upload className="mr-1.5 h-4 w-4" />
+            Add files
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => void openFolderPicker(folderInput.current)}>
+            <FolderOpen className="mr-1.5 h-4 w-4" />
+            Add Folder
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => void openFolderPicker(rootFolderInput.current)}>
+            <FolderTree className="mr-1.5 h-4 w-4" />
+            Add Root Folder
+          </Button>
+        </div>
+        <ToolbarMenu
+          label="Open"
+          icon={FolderOpen}
+          className="lg:hidden"
+          items={[
+            { label: "Files", onSelect: () => void openFilePicker() },
+            {
+              label: "Folder",
+              onSelect: () => void openFolderPicker(folderInput.current),
+            },
+            {
+              label: "Root folder",
+              onSelect: () => void openFolderPicker(rootFolderInput.current),
+            },
+          ]}
+        />
+        {pendingLibrarySources.length > 0 && (
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => void restoreLibrarySources(pendingLibrarySources, true)}
+          >
+            <FolderOpen className="mr-1.5 h-4 w-4" />
+            Restore library ({pendingLibrarySources.length})
+          </Button>
+        )}
         <Button size="sm" variant="secondary" onClick={saveAll} disabled={!files.length}>
           <Save className="mr-1.5 h-4 w-4" />
           Save {selectedFiles.length ? `(${selectedFiles.length})` : "all"}
         </Button>
-        <Button size="sm" variant="outline" onClick={() => setFolderRenameOpen(true)} disabled={!files.length}>
-          <FolderEdit className="mr-1.5 h-4 w-4" />
-          Rename Folders
-        </Button>
-        <Button size="sm" variant="outline" onClick={() => setBulkEditOpen(true)} disabled={!files.length}>
-          <Wand2 className="mr-1.5 h-4 w-4" />
-          Bulk Edit
-        </Button>
+        <div className="hidden items-center gap-2 2xl:flex">
+          <Button size="sm" variant="outline" onClick={() => setFolderRenameOpen(true)} disabled={!files.length}>
+            <FolderEdit className="mr-1.5 h-4 w-4" />
+            Rename Folders
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => setBulkEditOpen(true)} disabled={!files.length}>
+            <Wand2 className="mr-1.5 h-4 w-4" />
+            Bulk Edit
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => setConverterOpen(true)} disabled={!files.length}>
+            <Type className="mr-1.5 h-4 w-4" />
+            Convert
+          </Button>
+        </div>
+        <ToolbarMenu
+          label="Tools"
+          icon={Wand2}
+          disabled={!files.length}
+          className="2xl:hidden"
+          items={[
+            { label: "Rename folders", onSelect: () => setFolderRenameOpen(true) },
+            { label: "Bulk edit", onSelect: () => setBulkEditOpen(true) },
+            { label: "Convert tags", onSelect: () => setConverterOpen(true) },
+          ]}
+        />
+        <LoadedFilesMenu
+          total={files.length}
+          selected={selected.size}
+          onRemoveSelected={() => void removeSelected()}
+          onRemoveAll={() => void removeAll()}
+        />
 
         <Separator orientation="vertical" className="h-7 mx-1" />
 
-        <div className="hidden md:flex items-center gap-1">
+        <div className="hidden 2xl:flex items-center gap-1">
           <span className="text-[11px] uppercase tracking-wider text-muted-foreground mr-1">
             AI
           </span>
@@ -918,6 +1416,18 @@ function TagMaestro() {
             Cover art
           </Button>
         </div>
+        <ToolbarMenu
+          label="AI"
+          icon={Sparkles}
+          disabled={!files.length}
+          className="2xl:hidden"
+          items={[
+            { label: "From filename", onSelect: () => void runAiAutofill() },
+            { label: "Identify", onSelect: () => void runAiIdentify() },
+            { label: "Clean up", onSelect: () => void runAiCleanup() },
+            { label: "Cover art", onSelect: () => void runAiCover() },
+          ]}
+        />
 
         <div className="ml-auto flex items-center gap-2">
           {busy && !importProgress && (
@@ -932,7 +1442,7 @@ function TagMaestro() {
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
               placeholder="Filter…"
-              className="h-8 w-48 pl-7 text-xs"
+              className="h-8 w-48 pl-7 text-xs max-lg:w-24"
             />
           </div>
           <Button
@@ -953,7 +1463,11 @@ function TagMaestro() {
         {/* File table */}
         <main className="flex-1 min-w-0 flex flex-col overflow-hidden">
           {files.length === 0 ? (
-            <EmptyState onPick={() => fileInput.current?.click()} />
+            <EmptyState
+              onFiles={() => void openFilePicker()}
+              onFolder={() => void openFolderPicker(folderInput.current)}
+              onRootFolder={() => void openFolderPicker(rootFolderInput.current)}
+            />
           ) : (
             <FileTable
               files={filtered}
@@ -971,6 +1485,7 @@ function TagMaestro() {
               onEdit={updateTag}
               onEditFolder={updateFolderName}
               onRemoveSelected={removeSelected}
+              onRemoveAll={removeAll}
             />
           )}
         </main>
@@ -1102,22 +1617,40 @@ function ImportProgressPanel({ progress }: { progress: ImportProgress | null }) 
   );
 }
 
-function EmptyState({ onPick }: { onPick: () => void }) {
+function EmptyState({
+  onFiles,
+  onFolder,
+  onRootFolder,
+}: {
+  onFiles: () => void;
+  onFolder: () => void;
+  onRootFolder: () => void;
+}) {
   return (
     <div className="flex-1 min-h-0 grid place-items-center overflow-auto p-4">
-      <div className="w-full max-w-sm text-center border border-dashed border-border rounded-lg p-6 bg-card/40">
+      <div className="w-full max-w-md text-center border border-dashed border-border rounded-lg p-6 bg-card/40">
         <div className="mx-auto mb-3 h-10 w-10 rounded-md bg-primary/15 text-primary grid place-items-center">
           <Upload className="h-5 w-5" />
         </div>
-        <h2 className="text-base font-semibold">Drop audio files here</h2>
+        <h2 className="text-base font-semibold">Drop audio files or folders here</h2>
         <p className="mt-1 text-[11px] text-muted-foreground">MP3 · M4A · FLAC · WAV</p>
         <p className="mt-1 text-xs text-muted-foreground">
           Everything stays in your browser. No uploads, no accounts.
         </p>
-        <Button className="mt-4 h-8 text-xs" onClick={onPick}>
-          <Upload className="mr-1.5 h-4 w-4" />
-          Choose files
-        </Button>
+        <div className="mt-4 grid grid-cols-3 gap-2">
+          <Button className="h-8 text-xs" onClick={onFiles}>
+            <Upload className="mr-1.5 h-4 w-4" />
+            Files
+          </Button>
+          <Button variant="outline" className="h-8 text-xs" onClick={onFolder}>
+            <FolderOpen className="mr-1.5 h-4 w-4" />
+            Folder
+          </Button>
+          <Button variant="outline" className="h-8 text-xs" onClick={onRootFolder}>
+            <FolderTree className="mr-1.5 h-4 w-4" />
+            Root folder
+          </Button>
+        </div>
         <div className="mt-4 grid grid-cols-2 gap-2 text-left text-xs text-muted-foreground">
           <Feature icon={FileText} title="Auto-fill" desc="Parse tags from filenames" />
           <Feature icon={Sparkles} title="Identify" desc="Find missing metadata" />
@@ -1184,6 +1717,7 @@ function FileTable({
   onEdit,
   onEditFolder,
   onRemoveSelected,
+  onRemoveAll,
 }: {
   files: Mp3File[];
   selected: Set<string>;
@@ -1193,6 +1727,7 @@ function FileTable({
   onEdit: (id: string, key: TagKey, value: string) => void;
   onEditFolder: (id: string, value: string) => void;
   onRemoveSelected: () => void;
+  onRemoveAll: () => void;
 }) {
   const [visibleColumns, setVisibleColumns] = useState<Set<TableColumnKey>>(
     () => new Set(DEFAULT_VISIBLE_COLUMNS),
@@ -1727,6 +2262,15 @@ function FileTable({
           >
             Remove selected
           </ContextMenuItem>
+          <ContextMenuItem
+            danger
+            onSelect={() => {
+              onRemoveAll();
+              setRowMenu(null);
+            }}
+          >
+            Remove all loaded
+          </ContextMenuItem>
         </div>
       )}
 
@@ -1814,6 +2358,152 @@ function FileTable({
           </select>
         </div>
       </div>
+    </div>
+  );
+}
+
+function ToolbarMenu({
+  label,
+  icon: Icon,
+  disabled,
+  className = "",
+  items,
+}: {
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  disabled?: boolean;
+  className?: string;
+  items: Array<{ label: string; onSelect: () => void; disabled?: boolean }>;
+}) {
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function close(event: PointerEvent) {
+      if (!menuRef.current?.contains(event.target as Node)) setOpen(false);
+    }
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("pointerdown", close);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", close);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [open]);
+
+  return (
+    <div ref={menuRef} className={"relative " + className}>
+      <Button
+        size="sm"
+        variant="outline"
+        disabled={disabled}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <Icon className="mr-1.5 h-4 w-4" />
+        {label}
+        <ChevronDown className="ml-1 h-3.5 w-3.5" />
+      </Button>
+      {open && (
+        <div
+          role="menu"
+          className="absolute left-0 top-full z-[70] mt-1 w-48 rounded-sm border border-border bg-background py-1 text-xs text-foreground shadow-sm"
+        >
+          {items.map((item) => (
+            <ContextMenuItem
+              key={item.label}
+              disabled={item.disabled}
+              onSelect={() => {
+                item.onSelect();
+                setOpen(false);
+              }}
+            >
+              {item.label}
+            </ContextMenuItem>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LoadedFilesMenu({
+  total,
+  selected,
+  onRemoveSelected,
+  onRemoveAll,
+}: {
+  total: number;
+  selected: number;
+  onRemoveSelected: () => void;
+  onRemoveAll: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function close(event: PointerEvent) {
+      if (!menuRef.current?.contains(event.target as Node)) setOpen(false);
+    }
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("pointerdown", close);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", close);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [open]);
+
+  return (
+    <div ref={menuRef} className="relative">
+      <Button
+        size="sm"
+        variant="outline"
+        disabled={!total}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <Trash2 className="mr-1.5 h-4 w-4" />
+        Remove
+        <ChevronDown className="ml-1 h-3.5 w-3.5" />
+      </Button>
+      {open && (
+        <div
+          role="menu"
+          className="absolute left-0 top-full z-[70] mt-1 w-52 rounded-sm border border-border bg-background py-1 text-xs text-foreground shadow-sm"
+        >
+          <ContextMenuItem
+            danger
+            disabled={!selected}
+            onSelect={() => {
+              onRemoveSelected();
+              setOpen(false);
+            }}
+          >
+            Remove selected ({selected})
+          </ContextMenuItem>
+          <ContextMenuItem
+            danger
+            onSelect={() => {
+              onRemoveAll();
+              setOpen(false);
+            }}
+          >
+            Remove all loaded ({total})
+          </ContextMenuItem>
+          <div className="border-t border-border px-3 py-1.5 text-[10px] text-muted-foreground">
+            Source files are not deleted
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -2249,6 +2939,19 @@ function renamedFilename(m: Mp3File, pattern: string): string {
   const base = dot > 0 ? orig.slice(0, dot) : orig;
   if (m.renamedBase !== undefined) return m.renamedBase + ext;
   return renameByPattern(pattern, m.tags, base) + ext;
+}
+
+function directSaveFilename(m: Mp3File): string {
+  if (m.renamedBase === undefined) return m.file.name;
+  const dot = m.file.name.lastIndexOf(".");
+  const extension = dot > 0 ? m.file.name.slice(dot) : "";
+  return m.renamedBase + extension;
+}
+
+function replacePathFilename(path: string, filename: string): string {
+  if (!path) return filename;
+  const slash = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+  return slash >= 0 ? path.slice(0, slash + 1) + filename : filename;
 }
 
 function aiErrorMessage(e: unknown): string {
