@@ -549,9 +549,11 @@ function TagMaestro() {
         if (!selected.has(f.id)) return f;
         const next: Mp3Tags = { ...f.tags };
         for (const [k, v] of Object.entries(patch)) {
-          if (v === undefined || v === MULTI) continue;
-          if (k === "cover") next.cover = v as Mp3Tags["cover"];
-          else (next as any)[k] = v;
+          if (k === "cover") {
+            next.cover = v as Mp3Tags["cover"];
+          } else if (v !== undefined && v !== MULTI) {
+            (next as any)[k] = v;
+          }
         }
         return { ...f, tags: next, dirty: true };
       }),
@@ -575,6 +577,7 @@ function TagMaestro() {
     try {
       if (canSaveDirect) {
         let saved = 0;
+        const savedFiles = new Map<string, File>();
         for (const m of targets) {
           const handle = m.sourceHandle as WritableFileHandle;
           const allowed = await ensureWritePermission(handle);
@@ -584,6 +587,7 @@ function TagMaestro() {
           const writable = await handle.createWritable();
           await writable.write(blob);
           await writable.close();
+          savedFiles.set(m.id, await handle.getFile());
           saved += 1;
           setBusy(`Saving directly… ${saved}/${targets.length}`);
         }
@@ -591,7 +595,14 @@ function TagMaestro() {
         const savedIds = new Set(targets.map((m) => m.id));
         setFiles((prev) =>
           prev.map((f) =>
-            savedIds.has(f.id) ? { ...f, dirty: false, original: cloneTags(f.tags) } : f,
+            savedIds.has(f.id)
+              ? {
+                  ...f,
+                  file: savedFiles.get(f.id) || f.file,
+                  dirty: false,
+                  original: cloneTags(f.tags),
+                }
+              : f,
           ),
         );
         toast.success(`Saved ${saved} file${saved > 1 ? "s" : ""} directly`);

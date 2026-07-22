@@ -1,19 +1,29 @@
 // Client-only audio tag utilities.
-// Reads tags with jsmediatags (MP3, M4A, FLAC; best-effort WAV).
-// Writes ID3 tags for MP3 with browser-id3-writer. Other formats are
-// currently exported with the original bytes (rename + AI edits still work in-app;
-// tag-write for M4A/FLAC/WAV is not yet supported by browser libs).
+// Reads tags with jsmediatags and writes format-native tags with TagLib-Wasm.
 import jsmediatags from "jsmediatags/dist/jsmediatags.min.js";
-import { ID3Writer } from "browser-id3-writer";
+import type { AudioFile, PropertyMap, TagLib } from "taglib-wasm";
 
 export type AudioFormat = "mp3" | "m4a" | "flac" | "wav" | "other";
 
 export function detectFormat(file: File): AudioFormat {
   const n = file.name.toLowerCase();
   if (n.endsWith(".mp3") || file.type === "audio/mpeg") return "mp3";
-  if (n.endsWith(".m4a") || n.endsWith(".mp4") || file.type === "audio/mp4" || file.type === "audio/x-m4a") return "m4a";
-  if (n.endsWith(".flac") || file.type === "audio/flac" || file.type === "audio/x-flac") return "flac";
-  if (n.endsWith(".wav") || file.type === "audio/wav" || file.type === "audio/wave" || file.type === "audio/x-wav") return "wav";
+  if (
+    n.endsWith(".m4a") ||
+    n.endsWith(".mp4") ||
+    file.type === "audio/mp4" ||
+    file.type === "audio/x-m4a"
+  )
+    return "m4a";
+  if (n.endsWith(".flac") || file.type === "audio/flac" || file.type === "audio/x-flac")
+    return "flac";
+  if (
+    n.endsWith(".wav") ||
+    file.type === "audio/wav" ||
+    file.type === "audio/wave" ||
+    file.type === "audio/x-wav"
+  )
+    return "wav";
   return "other";
 }
 
@@ -66,6 +76,15 @@ export interface Mp3File {
   renamedBase?: string;
 }
 
+let tagLibPromise: Promise<TagLib> | null = null;
+
+function getTagLib(): Promise<TagLib> {
+  if (!tagLibPromise) {
+    tagLibPromise = import("taglib-wasm").then(({ TagLib }) => TagLib.initialize());
+  }
+  return tagLibPromise;
+}
+
 export const emptyTags = (): Mp3Tags => ({
   title: "",
   artist: "",
@@ -112,8 +131,7 @@ async function readAudioMeta(
   arrayBuffer: ArrayBuffer | null,
   skipAudioDecode?: boolean,
 ): Promise<FileMeta> {
-  const path =
-    (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name;
+  const path = (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name;
   const meta: FileMeta = {
     path,
     codec: format === "other" ? "Unknown" : format.toUpperCase(),
@@ -190,37 +208,15 @@ export async function readMp3(
   sourceHandle?: FileSystemFileHandle,
 ): Promise<Mp3File> {
   const format = detectFormat(file);
-  const tags = await new Promise<Mp3Tags>((resolve) => {
-    const t = emptyTags();
-    jsmediatags.read(file, {
-      onSuccess: (result: any) => {
-        const g = result.tags || {};
-        t.title = g.title || "";
-        t.artist = g.artist || "";
-        t.album = g.album || "";
-        t.albumArtist = g.band || g["TPE2"]?.data || "";
-        t.composer = g.composer || "";
-        t.year = String(g.year || "");
-        t.tag = g.grouping || g.contentGroupDescription || "";
-        t.genre = g.genre || "";
-        t.discnumber = String(g.disc || g.partOfSet || "");
-        t.track = String(g.track || "");
-        t.comment = typeof g.comment === "object" ? g.comment?.text || "" : g.comment || "";
-        t.bpm = String(g.bpm || g.beatsPerMinute || "");
-        if (readEmbeddedCover && g.picture) {
-          const data = new Uint8Array(g.picture.data);
-          const mime = g.picture.format || "image/jpeg";
-          t.cover = { data, mime, dataUrl: u8ToDataUrl(data, mime) };
-        }
-        resolve(t);
-      },
-      onError: () => resolve(t),
-    });
-  });
-  const rp = relativePath || (file as File & { webkitRelativePath?: string }).webkitRelativePath || "";
+  const tags =
+    format === "wav"
+      ? await readWavTags(file, readEmbeddedCover)
+      : await readTagsWithJsMedia(file, readEmbeddedCover);
+  const rp =
+    relativePath || (file as File & { webkitRelativePath?: string }).webkitRelativePath || "";
   const folderName = extractFolderName(rp || file.name);
   const folderPath = extractFolderPath(rp || file.name);
-  
+
   let arrayBuffer: ArrayBuffer | null = null;
   if (!skipAudioDecode) {
     try {
@@ -248,34 +244,373 @@ export async function readMp3(
 
 export async function writeTagsToBlob(m: Mp3File): Promise<Blob> {
   const arrayBuffer = await m.file.arrayBuffer();
-  // Only MP3 gets ID3 tags written. Other formats are returned as-is so the
-  // user still gets renamed files and can apply edits in-app.
-  if (m.format !== "mp3") {
-    return new Blob([arrayBuffer], { type: m.file.type || "application/octet-stream" });
+  if (m.format === "other") {
+    throw new Error(`Unsupported audio format: ${m.file.name}`);
   }
-  const writer = new ID3Writer(arrayBuffer);
-  const t = m.tags;
-  if (t.title) writer.setFrame("TIT2", t.title);
-  if (t.artist) writer.setFrame("TPE1", [t.artist]);
-  if (t.album) writer.setFrame("TALB", t.album);
-  if (t.albumArtist) writer.setFrame("TPE2", t.albumArtist);
-  if (t.composer) writer.setFrame("TCOM", [t.composer]);
-  if (t.year) writer.setFrame("TYER", parseInt(t.year, 10) || 0);
-  if (t.tag) writer.setFrame("TIT1", t.tag);
-  if (t.genre) writer.setFrame("TCON", [t.genre]);
-  if (t.discnumber) writer.setFrame("TPOS", t.discnumber);
-  if (t.track) writer.setFrame("TRCK", t.track);
-  if (t.bpm) writer.setFrame("TBPM", parseInt(t.bpm, 10) || 0);
-  if (t.comment) writer.setFrame("COMM", { description: "", text: t.comment, language: "eng" });
-  if (t.cover) {
-    writer.setFrame("APIC", {
-      type: 3,
-      data: t.cover.data.buffer.slice(t.cover.data.byteOffset, t.cover.data.byteOffset + t.cover.data.byteLength),
-      description: "Cover",
+
+  const taglib = await getTagLib();
+  const output = await taglib.edit(
+    { name: m.file.name, data: new Uint8Array(arrayBuffer) },
+    (audioFile) => applyTagChanges(audioFile, m),
+  );
+  const tagged =
+    m.format === "wav" && !coversEqual(m.tags.cover, m.original.cover)
+      ? updateWavCover(output, m.tags.cover)
+      : output;
+  return new Blob([tagged], { type: m.file.type || mimeForFormat(m.format) });
+}
+
+async function readTagsWithJsMedia(file: File, readEmbeddedCover: boolean): Promise<Mp3Tags> {
+  return new Promise<Mp3Tags>((resolve) => {
+    const t = emptyTags();
+    jsmediatags.read(file, {
+      onSuccess: (result: any) => {
+        const g = result.tags || {};
+        t.title = g.title || "";
+        t.artist = g.artist || "";
+        t.album = g.album || "";
+        t.albumArtist = g.band || g["TPE2"]?.data || "";
+        t.composer = g.composer || "";
+        t.year = String(g.year || "");
+        t.tag = g.grouping || g.contentGroupDescription || "";
+        t.genre = g.genre || "";
+        t.discnumber = String(g.disc || g.partOfSet || "");
+        t.track = String(g.track || "");
+        t.comment = typeof g.comment === "object" ? g.comment?.text || "" : g.comment || "";
+        t.bpm = String(g.bpm || g.beatsPerMinute || "");
+        if (readEmbeddedCover && g.picture) {
+          const data = new Uint8Array(g.picture.data);
+          const mime = g.picture.format || "image/jpeg";
+          t.cover = { data, mime, dataUrl: u8ToDataUrl(data, mime) };
+        }
+        resolve(t);
+      },
+      onError: () => resolve(t),
     });
+  });
+}
+
+async function readWavTags(file: File, readEmbeddedCover: boolean): Promise<Mp3Tags> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const taglib = await getTagLib();
+  const audioFile = await taglib.open({ name: file.name, data: bytes });
+  try {
+    const properties = audioFile.properties();
+    const track = joinNumberPair(
+      firstValue(properties.trackNumber),
+      firstValue(properties.totalTracks),
+    );
+    const disc = joinNumberPair(
+      firstValue(properties.discNumber),
+      firstValue(properties.totalDiscs),
+    );
+    const tags: Mp3Tags = {
+      title: firstValue(properties.title),
+      artist: firstValue(properties.artist),
+      album: firstValue(properties.album),
+      albumArtist: firstValue(properties.albumArtist),
+      composer: firstValue(properties.composer),
+      year: firstValue(properties.date),
+      tag: firstValue(properties.grouping),
+      genre: firstValue(properties.genre),
+      discnumber: disc,
+      track,
+      comment: firstValue(properties.comment),
+      bpm: firstValue(properties.bpm),
+    };
+    if (readEmbeddedCover) tags.cover = readWavCover(bytes);
+    return tags;
+  } finally {
+    audioFile.dispose();
   }
-  writer.addTag();
-  return writer.getBlob();
+}
+
+function firstValue(values: string[] | undefined): string {
+  return values?.[0] || "";
+}
+
+function joinNumberPair(number: string, total: string): string {
+  return total ? `${number}/${total}` : number;
+}
+
+function applyTagChanges(audioFile: AudioFile, m: Mp3File): void {
+  const t = m.tags;
+  const [trackNumber, totalTracks] = splitNumberPair(t.track);
+  const [discNumber, totalDiscs] = splitNumberPair(t.discnumber);
+  const managed: PropertyMap = {
+    title: stringValues(t.title),
+    artist: stringValues(t.artist),
+    album: stringValues(t.album),
+    albumArtist: stringValues(t.albumArtist),
+    composer: stringValues(t.composer),
+    date: stringValues(t.year),
+    grouping: stringValues(t.tag),
+    genre: stringValues(t.genre),
+    discNumber: stringValues(discNumber),
+    totalDiscs: stringValues(totalDiscs),
+    trackNumber: stringValues(trackNumber),
+    totalTracks: stringValues(totalTracks),
+    comment: stringValues(t.comment),
+    bpm: stringValues(t.bpm),
+  };
+
+  audioFile.setProperties({ ...audioFile.properties(), ...managed });
+
+  if (coversEqual(t.cover, m.original.cover)) return;
+  // TagLib's WAV backend writes text fields but not embedded pictures.
+  // WAV artwork is handled as a standard RIFF ID3 chunk after TagLib saves.
+  if (m.format === "wav") return;
+  if (!t.cover) {
+    audioFile.removePictures();
+    return;
+  }
+
+  const otherPictures = audioFile.getPictures().filter((picture) => picture.type !== "FrontCover");
+  audioFile.setPictures([
+    {
+      type: "FrontCover",
+      mimeType: t.cover.mime,
+      data: t.cover.data,
+      description: "Cover",
+    },
+    ...otherPictures,
+  ]);
+}
+
+function stringValues(value: string): string[] {
+  return value.trim() ? [value] : [];
+}
+
+function splitNumberPair(value: string): [string, string] {
+  const [number = "", total = ""] = value.split("/", 2);
+  return [number.trim(), total.trim()];
+}
+
+function coversEqual(a: Mp3Tags["cover"], b: Mp3Tags["cover"]): boolean {
+  if (!a || !b) return a === b;
+  if (a.mime !== b.mime || a.data.byteLength !== b.data.byteLength) return false;
+  for (let i = 0; i < a.data.byteLength; i++) {
+    if (a.data[i] !== b.data[i]) return false;
+  }
+  return true;
+}
+
+function mimeForFormat(format: AudioFormat): string {
+  if (format === "mp3") return "audio/mpeg";
+  if (format === "m4a") return "audio/mp4";
+  if (format === "flac") return "audio/flac";
+  if (format === "wav") return "audio/wav";
+  return "application/octet-stream";
+}
+
+function updateWavCover(wav: Uint8Array, cover: Mp3Tags["cover"]): Uint8Array {
+  if (ascii(wav, 0, 4) !== "RIFF" || ascii(wav, 8, 12) !== "WAVE") {
+    throw new Error("Invalid WAV container");
+  }
+
+  const parts: Uint8Array[] = [wav.slice(0, 12)];
+  let offset = 12;
+  let replacedId3 = false;
+
+  while (offset + 8 <= wav.byteLength) {
+    const chunkId = ascii(wav, offset, offset + 4);
+    const chunkSize = readUint32LE(wav, offset + 4);
+    const dataStart = offset + 8;
+    const chunkEnd = dataStart + chunkSize;
+    const paddedEnd = chunkEnd + (chunkSize & 1);
+    if (chunkEnd > wav.byteLength) break;
+
+    if (chunkId.toLowerCase() === "id3 ") {
+      if (!replacedId3) {
+        const id3 = replaceId3Cover(wav.slice(dataStart, chunkEnd), cover);
+        if (id3.byteLength) parts.push(makeRiffChunk("id3 ", id3));
+        replacedId3 = true;
+      }
+    } else {
+      parts.push(wav.slice(offset, Math.min(paddedEnd, wav.byteLength)));
+    }
+    offset = paddedEnd;
+  }
+
+  if (offset < wav.byteLength) parts.push(wav.slice(offset));
+  if (!replacedId3 && cover) parts.push(makeRiffChunk("id3 ", makeId3Tag([], cover, 3)));
+
+  const output = concatBytes(parts);
+  writeUint32LE(output, 4, output.byteLength - 8);
+  return output;
+}
+
+function readWavCover(wav: Uint8Array): Mp3Tags["cover"] {
+  if (ascii(wav, 0, 4) !== "RIFF" || ascii(wav, 8, 12) !== "WAVE") return undefined;
+
+  let offset = 12;
+  while (offset + 8 <= wav.byteLength) {
+    const chunkId = ascii(wav, offset, offset + 4);
+    const chunkSize = readUint32LE(wav, offset + 4);
+    const dataStart = offset + 8;
+    const chunkEnd = dataStart + chunkSize;
+    if (chunkEnd > wav.byteLength) return undefined;
+    if (chunkId.toLowerCase() === "id3 ") {
+      return readId3Cover(wav.subarray(dataStart, chunkEnd));
+    }
+    offset = chunkEnd + (chunkSize & 1);
+  }
+  return undefined;
+}
+
+function readId3Cover(tag: Uint8Array): Mp3Tags["cover"] {
+  if (tag.byteLength < 10 || ascii(tag, 0, 3) !== "ID3") return undefined;
+  const version = tag[3] === 4 ? 4 : 3;
+  const tagEnd = Math.min(tag.byteLength, 10 + readSyncSafe(tag, 6));
+  let offset = id3FrameStart(tag, tagEnd, version);
+
+  while (offset + 10 <= tagEnd) {
+    const id = ascii(tag, offset, offset + 4);
+    if (!/^[A-Z0-9]{4}$/.test(id)) break;
+    const size = version === 4 ? readSyncSafe(tag, offset + 4) : readUint32BE(tag, offset + 4);
+    const bodyStart = offset + 10;
+    const bodyEnd = bodyStart + size;
+    if (bodyEnd > tagEnd) break;
+    if (id === "APIC") return parseApicBody(tag.subarray(bodyStart, bodyEnd));
+    offset = bodyEnd;
+  }
+  return undefined;
+}
+
+function parseApicBody(body: Uint8Array): Mp3Tags["cover"] {
+  if (body.byteLength < 5) return undefined;
+  const encoding = body[0];
+  const mimeEnd = body.indexOf(0, 1);
+  if (mimeEnd < 0 || mimeEnd + 2 >= body.byteLength) return undefined;
+  const mime = ascii(body, 1, mimeEnd) || "image/jpeg";
+  const descriptionStart = mimeEnd + 2;
+  let dataStart = descriptionStart;
+
+  if (encoding === 1 || encoding === 2) {
+    while (dataStart + 1 < body.byteLength) {
+      if (body[dataStart] === 0 && body[dataStart + 1] === 0) {
+        dataStart += 2;
+        break;
+      }
+      dataStart += 2;
+    }
+  } else {
+    const descriptionEnd = body.indexOf(0, descriptionStart);
+    dataStart = descriptionEnd < 0 ? body.byteLength : descriptionEnd + 1;
+  }
+
+  if (dataStart >= body.byteLength) return undefined;
+  const data = body.slice(dataStart);
+  return { data, mime, dataUrl: u8ToDataUrl(data, mime) };
+}
+
+function replaceId3Cover(existing: Uint8Array, cover: Mp3Tags["cover"]): Uint8Array {
+  if (existing.byteLength < 10 || ascii(existing, 0, 3) !== "ID3") {
+    return cover ? makeId3Tag([], cover, 3) : new Uint8Array();
+  }
+
+  const version = existing[3] === 4 ? 4 : 3;
+  const tagEnd = Math.min(existing.byteLength, 10 + readSyncSafe(existing, 6));
+  const frames: Uint8Array[] = [];
+  let offset = id3FrameStart(existing, tagEnd, version);
+
+  while (offset + 10 <= tagEnd) {
+    const id = ascii(existing, offset, offset + 4);
+    if (!/^[A-Z0-9]{4}$/.test(id)) break;
+    const size =
+      version === 4 ? readSyncSafe(existing, offset + 4) : readUint32BE(existing, offset + 4);
+    const end = offset + 10 + size;
+    if (size < 0 || end > tagEnd) break;
+    if (id !== "APIC") frames.push(existing.slice(offset, end));
+    offset = end;
+  }
+
+  if (!cover && !frames.length) return new Uint8Array();
+  return makeId3Tag(frames, cover, version);
+}
+
+function id3FrameStart(tag: Uint8Array, tagEnd: number, version: number): number {
+  if (!(tag[5] & 0x40) || tagEnd < 14) return 10;
+  const size = version === 4 ? readSyncSafe(tag, 10) : readUint32BE(tag, 10) + 4;
+  return Math.min(tagEnd, 10 + size);
+}
+
+function makeId3Tag(
+  retainedFrames: Uint8Array[],
+  cover: Mp3Tags["cover"],
+  version: 3 | 4,
+): Uint8Array {
+  const frames = cover ? [...retainedFrames, makeApicFrame(cover, version)] : retainedFrames;
+  const body = concatBytes(frames);
+  const header = new Uint8Array(10);
+  header.set([0x49, 0x44, 0x33, version, 0, 0], 0);
+  writeSyncSafe(header, 6, body.byteLength);
+  return concatBytes([header, body]);
+}
+
+function makeApicFrame(cover: NonNullable<Mp3Tags["cover"]>, version: 3 | 4): Uint8Array {
+  const mime = new TextEncoder().encode(cover.mime || "image/jpeg");
+  const body = concatBytes([new Uint8Array([0]), mime, new Uint8Array([0, 3, 0]), cover.data]);
+  const frame = new Uint8Array(10 + body.byteLength);
+  frame.set([0x41, 0x50, 0x49, 0x43], 0);
+  if (version === 4) writeSyncSafe(frame, 4, body.byteLength);
+  else writeUint32BE(frame, 4, body.byteLength);
+  frame.set(body, 10);
+  return frame;
+}
+
+function makeRiffChunk(id: string, data: Uint8Array): Uint8Array {
+  const chunk = new Uint8Array(8 + data.byteLength + (data.byteLength & 1));
+  chunk.set(new TextEncoder().encode(id), 0);
+  writeUint32LE(chunk, 4, data.byteLength);
+  chunk.set(data, 8);
+  return chunk;
+}
+
+function concatBytes(parts: Uint8Array[]): Uint8Array {
+  const output = new Uint8Array(parts.reduce((total, part) => total + part.byteLength, 0));
+  let offset = 0;
+  for (const part of parts) {
+    output.set(part, offset);
+    offset += part.byteLength;
+  }
+  return output;
+}
+
+function ascii(bytes: Uint8Array, start: number, end: number): string {
+  return String.fromCharCode(...bytes.subarray(start, end));
+}
+
+function readUint32LE(bytes: Uint8Array, offset: number): number {
+  return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(offset, true);
+}
+
+function readUint32BE(bytes: Uint8Array, offset: number): number {
+  return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(offset, false);
+}
+
+function writeUint32LE(bytes: Uint8Array, offset: number, value: number): void {
+  new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).setUint32(offset, value, true);
+}
+
+function writeUint32BE(bytes: Uint8Array, offset: number, value: number): void {
+  new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).setUint32(offset, value, false);
+}
+
+function readSyncSafe(bytes: Uint8Array, offset: number): number {
+  return (
+    ((bytes[offset] & 0x7f) << 21) |
+    ((bytes[offset + 1] & 0x7f) << 14) |
+    ((bytes[offset + 2] & 0x7f) << 7) |
+    (bytes[offset + 3] & 0x7f)
+  );
+}
+
+function writeSyncSafe(bytes: Uint8Array, offset: number, value: number): void {
+  bytes[offset] = (value >> 21) & 0x7f;
+  bytes[offset + 1] = (value >> 14) & 0x7f;
+  bytes[offset + 2] = (value >> 7) & 0x7f;
+  bytes[offset + 3] = value & 0x7f;
 }
 
 export function dataUrlToCover(dataUrl: string): Mp3Tags["cover"] {
