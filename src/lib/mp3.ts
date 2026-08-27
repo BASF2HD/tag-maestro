@@ -81,12 +81,22 @@ export interface Mp3File {
 }
 
 let tagLibPromise: Promise<TagLib> | null = null;
+let tagReadQueue: Promise<void> = Promise.resolve();
 
 function getTagLib(): Promise<TagLib> {
   if (!tagLibPromise) {
     tagLibPromise = import("taglib-wasm").then(({ TagLib }) => TagLib.initialize());
   }
   return tagLibPromise;
+}
+
+function queueTagLibRead<T>(read: () => Promise<T>): Promise<T> {
+  const next = tagReadQueue.then(read, read);
+  tagReadQueue = next.then(
+    () => undefined,
+    () => undefined,
+  );
+  return next;
 }
 
 export const emptyTags = (): Mp3Tags => ({
@@ -267,7 +277,7 @@ export async function writeTagsToBlob(m: Mp3File): Promise<Blob> {
 }
 
 async function readTagsWithJsMedia(file: File, readEmbeddedCover: boolean): Promise<Mp3Tags> {
-  return new Promise<Mp3Tags>((resolve) => {
+  const primary = await new Promise<Mp3Tags>((resolve) => {
     const t = emptyTags();
     jsmediatags.read(file, {
       onSuccess: (result: any) => {
@@ -294,6 +304,79 @@ async function readTagsWithJsMedia(file: File, readEmbeddedCover: boolean): Prom
       onError: () => resolve(t),
     });
   });
+
+  if (primary.title.trim()) return primary;
+
+  try {
+    const fallback = await queueTagLibRead(() =>
+      readTextTagsWithTagLib(file, readEmbeddedCover && !primary.cover),
+    );
+    return mergeMissingTags(primary, fallback);
+  } catch {
+    return primary;
+  }
+}
+
+async function readTextTagsWithTagLib(
+  file: File,
+  readEmbeddedCover: boolean,
+): Promise<Mp3Tags> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const taglib = await getTagLib();
+  const audioFile = await taglib.open({ name: file.name, data: bytes });
+  try {
+    const properties = audioFile.properties();
+    const tags: Mp3Tags = {
+      title: firstValue(properties.title),
+      artist: firstValue(properties.artist),
+      album: firstValue(properties.album),
+      albumArtist: firstValue(properties.albumArtist),
+      composer: firstValue(properties.composer),
+      year: firstValue(properties.date),
+      tag: firstValue(properties.grouping),
+      genre: firstValue(properties.genre),
+      discnumber: joinNumberPair(
+        firstValue(properties.discNumber),
+        firstValue(properties.totalDiscs),
+      ),
+      track: joinNumberPair(
+        firstValue(properties.trackNumber),
+        firstValue(properties.totalTracks),
+      ),
+      comment: firstValue(properties.comment),
+      bpm: firstValue(properties.bpm),
+    };
+    if (readEmbeddedCover) {
+      const pictures = audioFile.getPictures();
+      const picture = pictures.find((candidate) => candidate.type === "FrontCover") || pictures[0];
+      if (picture) {
+        const data = new Uint8Array(picture.data);
+        const mime = picture.mimeType || "image/jpeg";
+        tags.cover = { data, mime, dataUrl: u8ToDataUrl(data, mime) };
+      }
+    }
+    return tags;
+  } finally {
+    audioFile.dispose();
+  }
+}
+
+function mergeMissingTags(primary: Mp3Tags, fallback: Mp3Tags): Mp3Tags {
+  return {
+    title: primary.title || fallback.title,
+    artist: primary.artist || fallback.artist,
+    album: primary.album || fallback.album,
+    albumArtist: primary.albumArtist || fallback.albumArtist,
+    composer: primary.composer || fallback.composer,
+    year: primary.year || fallback.year,
+    tag: primary.tag || fallback.tag,
+    genre: primary.genre || fallback.genre,
+    discnumber: primary.discnumber || fallback.discnumber,
+    track: primary.track || fallback.track,
+    comment: primary.comment || fallback.comment,
+    bpm: primary.bpm || fallback.bpm,
+    cover: primary.cover || fallback.cover,
+  };
 }
 
 async function readWavTags(file: File, readEmbeddedCover: boolean): Promise<Mp3Tags> {

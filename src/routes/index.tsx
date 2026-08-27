@@ -22,7 +22,6 @@ import {
   MoreVertical,
   FolderOpen,
   FolderTree,
-  FolderEdit,
   ChevronLeft,
   ChevronRight,
   ChevronsLeft,
@@ -33,7 +32,6 @@ import {
   Sun,
   Moon,
   ChevronDown,
-  Type,
   Trash2,
 } from "@/components/icons";
 import {
@@ -58,6 +56,11 @@ import {
 } from "@/lib/ai.functions";
 import { FolderRenameDialog } from "@/components/FolderRenameDialog";
 import { BulkFieldEditDialog, type BulkFieldKey } from "@/components/BulkFieldEditDialog";
+import { ExtractTextDialog, type ExtractTagKey } from "@/components/ExtractTextDialog";
+import {
+  SplitTextToTagsDialog,
+  type SplitTagPatch,
+} from "@/components/SplitTextToTagsDialog";
 import {
   TagConverterDialog,
   type ConverterPatch,
@@ -303,6 +306,8 @@ function TagMaestro() {
   const [folderRenameOpen, setFolderRenameOpen] = useState(false);
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
   const [converterOpen, setConverterOpen] = useState(false);
+  const [extractTextOpen, setExtractTextOpen] = useState(false);
+  const [splitTextOpen, setSplitTextOpen] = useState(false);
   const [pendingLibrarySources, setPendingLibrarySources] = useState<StoredLibrarySource[]>([]);
   const [editorWidth, setEditorWidth] = useState(getSavedEditorWidth);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -855,6 +860,28 @@ function TagMaestro() {
     toast.success(`Updated ${changes.size} file${changes.size > 1 ? "s" : ""}`);
   }
 
+  function handleExtractText(field: ExtractTagKey, changes: Map<string, string>) {
+    setFiles((prev) =>
+      prev.map((file) => {
+        const value = changes.get(file.id);
+        return value === undefined
+          ? file
+          : { ...file, tags: { ...file.tags, [field]: value }, dirty: true };
+      }),
+    );
+    toast.success(`Updated ${changes.size} file${changes.size === 1 ? "" : "s"}`);
+  }
+
+  function handleSplitText(changes: Map<string, SplitTagPatch>) {
+    setFiles((prev) =>
+      prev.map((file) => {
+        const patch = changes.get(file.id);
+        return patch ? { ...file, tags: { ...file.tags, ...patch }, dirty: true } : file;
+      }),
+    );
+    toast.success(`Split text into tags for ${changes.size} file${changes.size === 1 ? "" : "s"}`);
+  }
+
   function handleConvert(changes: Map<string, ConverterPatch>) {
     setFiles((prev) =>
       prev.map((file) => {
@@ -949,6 +976,74 @@ function TagMaestro() {
       toast.success("Removed all loaded files");
     } catch {
       toast.error("Files were removed, but saved library storage could not be cleared");
+    }
+  }
+
+  async function reloadTagsFromFiles() {
+    const targets = selectedFiles.length ? selectedFiles : files;
+    if (!targets.length) return;
+    const dirtyCount = targets.filter((file) => file.dirty).length;
+    if (
+      dirtyCount > 0 &&
+      !window.confirm(
+        `Reload tags for ${targets.length} file${targets.length === 1 ? "" : "s"}? ` +
+          `${dirtyCount} file${dirtyCount === 1 ? " has" : "s have"} unsaved changes that will be replaced.`,
+      )
+    ) {
+      return;
+    }
+
+    const refreshed = new Map<string, Mp3Tags>();
+    let failed = 0;
+    setBusy(`Reloading tags… 0/${targets.length}`);
+    setImportProgress({
+      title: "Reloading audio tags",
+      message: "Reading metadata from the source files…",
+      loaded: 0,
+      total: targets.length,
+    });
+    try {
+      for (let index = 0; index < targets.length; index += 1) {
+        const file = targets[index];
+        try {
+          const loaded = await readMp3(
+            file.file,
+            file.meta.path || file.libraryRelativePath || file.file.name,
+            true,
+            false,
+            file.sourceHandle,
+            file.sourceDirectoryHandle,
+          );
+          refreshed.set(file.id, { ...loaded.tags, cover: file.tags.cover });
+        } catch {
+          failed += 1;
+        }
+        const loadedCount = index + 1;
+        setBusy(`Reloading tags… ${loadedCount}/${targets.length}`);
+        setImportProgress({
+          title: "Reloading audio tags",
+          message: "Reading metadata from the source files…",
+          loaded: loadedCount,
+          total: targets.length,
+        });
+        if (loadedCount % 25 === 0) {
+          await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+        }
+      }
+
+      setFiles((current) =>
+        current.map((file) => {
+          const tags = refreshed.get(file.id);
+          return tags ? { ...file, tags, original: cloneTags(tags), dirty: false } : file;
+        }),
+      );
+      if (refreshed.size) {
+        toast.success(`Reloaded tags for ${refreshed.size} file${refreshed.size === 1 ? "" : "s"}`);
+      }
+      if (failed) toast.error(`Could not reload ${failed} file${failed === 1 ? "" : "s"}`);
+    } finally {
+      setBusy(null);
+      setImportProgress(null);
     }
   }
 
@@ -1280,10 +1375,22 @@ function TagMaestro() {
         files={selectedFiles.length ? selectedFiles : files}
         onApply={handleConvert}
       />
+      <ExtractTextDialog
+        open={extractTextOpen}
+        onOpenChange={setExtractTextOpen}
+        files={selectedFiles.length ? selectedFiles : files}
+        onApply={handleExtractText}
+      />
+      <SplitTextToTagsDialog
+        open={splitTextOpen}
+        onOpenChange={setSplitTextOpen}
+        files={selectedFiles.length ? selectedFiles : files}
+        onApply={handleSplitText}
+      />
       <ImportProgressPanel progress={importProgress} />
 
       {/* Header */}
-      <header className="shrink-0 border-b border-border bg-sidebar/60 backdrop-blur px-3 py-2 flex items-center gap-2">
+      <header className="relative z-30 shrink-0 border-b border-border bg-sidebar/60 backdrop-blur px-3 py-2 flex items-center gap-2">
         <div className="flex items-center gap-2">
           <div className="h-8 w-8 rounded-md bg-primary text-primary-foreground grid place-items-center shadow-[0_0_0_1px_var(--border)]">
             <Music4 className="h-4 w-4" />
@@ -1361,29 +1468,17 @@ function TagMaestro() {
           <Save className="mr-1.5 h-4 w-4" />
           Save {selectedFiles.length ? `(${selectedFiles.length})` : "all"}
         </Button>
-        <div className="hidden items-center gap-2 2xl:flex">
-          <Button size="sm" variant="outline" onClick={() => setFolderRenameOpen(true)} disabled={!files.length}>
-            <FolderEdit className="mr-1.5 h-4 w-4" />
-            Rename Folders
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => setBulkEditOpen(true)} disabled={!files.length}>
-            <Wand2 className="mr-1.5 h-4 w-4" />
-            Bulk Edit
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => setConverterOpen(true)} disabled={!files.length}>
-            <Type className="mr-1.5 h-4 w-4" />
-            Convert
-          </Button>
-        </div>
         <ToolbarMenu
           label="Tools"
           icon={Wand2}
           disabled={!files.length}
-          className="2xl:hidden"
           items={[
             { label: "Rename folders", onSelect: () => setFolderRenameOpen(true) },
             { label: "Bulk edit", onSelect: () => setBulkEditOpen(true) },
             { label: "Convert tags", onSelect: () => setConverterOpen(true) },
+            { label: "Extract text to tag", onSelect: () => setExtractTextOpen(true) },
+            { label: "Split text to tags", onSelect: () => setSplitTextOpen(true) },
+            { label: "Reload tags from files", onSelect: () => void reloadTagsFromFiles() },
           ]}
         />
         <LoadedFilesMenu
@@ -2715,6 +2810,7 @@ function EditorPanel({
   onCoverClear: () => void;
 }) {
   const coverInput = useRef<HTMLInputElement>(null);
+  const [showCoverArt, setShowCoverArt] = useState(true);
   // Unique non-empty values per field across selected files → dropdown options.
   const fieldOptions = useMemo(() => {
     const map: Partial<Record<TagKey, string[]>> = {};
@@ -2730,66 +2826,82 @@ function EditorPanel({
   }, [selectedFiles]);
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
-      <div className="shrink-0 border-b border-border px-3 py-2">
-        <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
-          Editor
-        </p>
-        <p className="text-xs font-medium mt-0.5">
-          {count === 0
-            ? "No selection"
-            : count === 1
-              ? "Editing 1 track"
-              : `Editing ${count} tracks`}
-        </p>
+      <div className="flex shrink-0 items-center justify-between border-b border-border px-3 py-2">
+        <div>
+          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
+            Editor
+          </p>
+          <p className="mt-0.5 text-xs font-medium">
+            {count === 0
+              ? "No selection"
+              : count === 1
+                ? "Editing 1 track"
+                : `Editing ${count} tracks`}
+          </p>
+        </div>
+        <button
+          type="button"
+          className="grid h-6 w-6 shrink-0 place-items-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
+          aria-label={showCoverArt ? "Hide cover art" : "Show cover art"}
+          title={showCoverArt ? "Hide cover art" : "Show cover art"}
+          aria-expanded={showCoverArt}
+          onClick={() => setShowCoverArt((value) => !value)}
+        >
+          <ChevronDown
+            className={`h-3.5 w-3.5 transition-transform ${showCoverArt ? "" : "-rotate-90"}`}
+          />
+        </button>
       </div>
 
-      <div className="shrink-0 px-3 py-2">
-        <div
-          className="aspect-square rounded-md border border-border bg-background/40 grid place-items-center overflow-hidden relative group"
-        >
-          {tags.cover?.dataUrl ? (
-            <img
-              src={tags.cover.dataUrl}
-              alt="Cover"
-              className="h-full w-full object-cover"
-            />
-          ) : (
-            <div className="text-center text-muted-foreground text-xs">
-              <ImageIcon className="h-6 w-6 mx-auto mb-1 opacity-50" />
-              No cover art
-            </div>
-          )}
-          {count > 0 && (
-            <div className="absolute inset-x-0 bottom-0 p-1.5 flex gap-1 bg-background/75 opacity-0 group-hover:opacity-100 transition-opacity">
-              <Button
-                size="sm"
-                variant="secondary"
-                className="flex-1 h-6 px-2 text-[11px]"
-                onClick={() => coverInput.current?.click()}
-              >
-                Upload
-              </Button>
-              {tags.cover && (
+      {showCoverArt && (
+        <div className="shrink-0 px-3 py-2">
+          <div
+            className="group relative grid aspect-square place-items-center overflow-hidden rounded-md border border-border bg-background/40"
+          >
+            {tags.cover?.dataUrl ? (
+              <img
+                src={tags.cover.dataUrl}
+                alt="Cover"
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              <div className="text-center text-xs text-muted-foreground">
+                <ImageIcon className="mx-auto mb-1 h-6 w-6 opacity-50" />
+                No cover art
+              </div>
+            )}
+            {count > 0 && (
+              <div className="absolute inset-x-0 bottom-0 flex gap-1 bg-background/75 p-1.5 opacity-0 transition-opacity group-hover:opacity-100">
                 <Button
                   size="sm"
-                  variant="ghost"
-                  className="h-6 px-2 text-[11px]"
-                  onClick={onCoverClear}
+                  variant="secondary"
+                  className="h-6 flex-1 px-2 text-[11px]"
+                  onClick={() => coverInput.current?.click()}
                 >
-                  Clear
+                  Upload
                 </Button>
-              )}
-            </div>
-          )}
+                {tags.cover && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-6 px-2 text-[11px]"
+                    onClick={onCoverClear}
+                  >
+                    Clear
+                  </Button>
+                )}
+              </div>
+            )}
+          </div>
+          <input
+            ref={coverInput}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => e.target.files?.[0] && onCoverPick(e.target.files[0])}
+          />
         </div>
-        <input
-          ref={coverInput}
-          type="file"
-          accept="image/*"
-          className="hidden"
-          onChange={(e) => e.target.files?.[0] && onCoverPick(e.target.files[0])}
-        />
-      </div>
+      )}
 
       <div className="flex-1 min-h-0 overflow-auto px-2.5 pb-2.5 space-y-1">
         {FIELDS.map((f) =>
