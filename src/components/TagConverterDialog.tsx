@@ -12,7 +12,6 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { Mp3File } from "@/lib/mp3";
 import {
   CONVERTER_FIELDS,
@@ -154,7 +153,7 @@ export function TagConverterDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex h-[min(720px,86vh)] max-w-3xl flex-col overflow-hidden p-0">
+      <DialogContent className="flex h-auto max-h-[86vh] max-w-3xl flex-col overflow-hidden p-0">
         <DialogHeader className="border-b border-border px-4 py-3">
           <div className="flex items-center gap-2">
             <div className="grid h-8 w-8 place-items-center rounded-md bg-primary/15 text-primary">
@@ -169,19 +168,42 @@ export function TagConverterDialog({
           </div>
         </DialogHeader>
 
-        <Tabs value={mode} onValueChange={(value) => changeMode(value as ConverterMode)}>
-          <TabsList className="h-10 w-full justify-start gap-1 border-b border-border bg-sidebar/20 px-3">
-            <TabsTrigger value="tag-filename" className="h-7 text-xs">
-              Tag → Filename
-            </TabsTrigger>
-            <TabsTrigger value="filename-tag" className="h-7 text-xs">
-              Filename → Tag
-            </TabsTrigger>
-            <TabsTrigger value="tag-tag" className="h-7 text-xs">
-              Tag → Tag
-            </TabsTrigger>
-          </TabsList>
-        </Tabs>
+        <div
+          className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-border bg-sidebar/20 px-4 py-2"
+          role="group"
+          aria-label="Conversion direction"
+        >
+          <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+            Direction
+          </span>
+          <label className="flex cursor-pointer items-center gap-1.5 text-xs text-foreground">
+            <input
+              type="checkbox"
+              checked={mode === "tag-filename"}
+              onChange={() => changeMode("tag-filename")}
+              className="h-3.5 w-3.5 accent-primary"
+            />
+            Tag → Filename
+          </label>
+          <label className="flex cursor-pointer items-center gap-1.5 text-xs text-foreground">
+            <input
+              type="checkbox"
+              checked={mode === "filename-tag"}
+              onChange={() => changeMode("filename-tag")}
+              className="h-3.5 w-3.5 accent-primary"
+            />
+            Filename → Tag
+          </label>
+          <label className="flex cursor-pointer items-center gap-1.5 text-xs text-foreground">
+            <input
+              type="checkbox"
+              checked={mode === "tag-tag"}
+              onChange={() => changeMode("tag-tag")}
+              className="h-3.5 w-3.5 accent-primary"
+            />
+            Tag → Tag
+          </label>
+        </div>
 
         <div className="grid grid-cols-[minmax(0,1fr)_180px] gap-3 border-b border-border bg-background px-4 py-3">
           {mode === "tag-tag" && (
@@ -250,10 +272,12 @@ export function TagConverterDialog({
           </div>
         </div>
 
-        <ScrollArea className="min-h-0 flex-1">
+        <ScrollArea className="max-h-24 shrink-0">
           {result.preview.length ? (
             <div className="divide-y divide-border/60">
-              {result.preview.slice(0, 300).map((row) => (
+              {(() => {
+                const row = result.preview[0];
+                return (
                 <div
                   key={row.id}
                   className="grid grid-cols-[150px_minmax(0,1fr)_20px_minmax(0,1fr)] items-center gap-2 px-4 py-2 text-xs"
@@ -269,15 +293,16 @@ export function TagConverterDialog({
                     {row.after || "<empty>"}
                   </span>
                 </div>
-              ))}
-              {result.preview.length > 300 && (
-                <div className="px-4 py-2 text-center text-xs text-muted-foreground">
-                  {result.preview.length - 300} more changes
+                );
+              })()}
+              {result.preview.length > 1 && (
+                <div className="px-4 py-2 text-center text-[11px] text-muted-foreground">
+                  Showing one example from {result.preview.length} changes.
                 </div>
               )}
             </div>
           ) : (
-            <div className="grid h-32 place-items-center text-xs text-muted-foreground">
+            <div className="grid h-16 place-items-center text-xs text-muted-foreground">
               {mode === "filename-tag" && result.unmatched
                 ? "Format does not match the filenames"
                 : "No changes"}

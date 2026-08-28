@@ -220,7 +220,7 @@ export function BulkFieldEditDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[900px] h-[650px] flex flex-col p-0 gap-0 overflow-hidden bg-background border border-border">
+      <DialogContent className="max-w-[900px] h-[min(600px,86vh)] flex flex-col p-0 gap-0 overflow-hidden bg-background border border-border">
         <DialogHeader className="p-4 border-b border-border flex flex-row items-center gap-2">
           <div className="h-8 w-8 rounded bg-primary/10 text-primary flex items-center justify-center">
             <Wand2 className="h-4 w-4" />
@@ -395,7 +395,10 @@ export function BulkFieldEditDialog({
                 <div className="text-center py-8 text-xs text-muted-foreground">No changes for the current rules.</div>
               ) : (
                 <div className="space-y-1">
-                  {Array.from(changes.entries()).slice(0, 200).map(([id, next]) => {
+                  {(() => {
+                    const firstChange = changes.entries().next().value as [string, string] | undefined;
+                    if (!firstChange) return null;
+                    const [id, next] = firstChange;
                     const f = files.find((x) => x.id === id);
                     if (!f) return null;
                     const cur = getFieldValue(f, field);
@@ -406,9 +409,11 @@ export function BulkFieldEditDialog({
                         <span className="flex-1 truncate font-mono text-primary font-medium" title={next}>{next || <span className="italic">&lt;empty&gt;</span>}</span>
                       </div>
                     );
-                  })}
-                  {changes.size > 200 && (
-                    <div className="text-center py-2 text-[10px] text-muted-foreground">…and {changes.size - 200} more</div>
+                  })()}
+                  {changes.size > 1 && (
+                    <div className="text-center py-2 text-[10px] text-muted-foreground">
+                      Showing one example from {changes.size} changes.
+                    </div>
                   )}
                 </div>
               )}

@@ -194,6 +194,8 @@ export function FolderRenameDialog({
     return map;
   }, [allFolderNames, selectedFolders, activeTab, findText, replaceText, useRegex, caseSensitive, prefix, suffix, insertText, insertPos, removeStart, removeLength, caseType, trimSpaces, collapseSpaces, removeSpecial]);
 
+  const firstRename = renamesMap.entries().next().value as [string, string] | undefined;
+
   const handleSelectAll = () => {
     setSelectedFolders(new Set(allFolderNames));
   };
@@ -222,7 +224,7 @@ export function FolderRenameDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[900px] h-[650px] flex flex-col p-0 gap-0 overflow-hidden bg-background border border-border">
+      <DialogContent className="max-w-[900px] h-[min(600px,86vh)] flex flex-col p-0 gap-0 overflow-hidden bg-background border border-border">
         <DialogHeader className="p-4 border-b border-border flex flex-row items-center gap-2">
           <div className="h-8 w-8 rounded bg-primary/10 text-primary flex items-center justify-center">
             <FolderEdit className="h-4 w-4" />
@@ -502,16 +504,21 @@ export function FolderRenameDialog({
                     </div>
                   ) : (
                     <div className="space-y-1">
-                      {Array.from(renamesMap.entries()).map(([orig, next]) => (
+                      {firstRename && (
                         <div
-                          key={orig}
+                          key={firstRename[0]}
                           className="flex items-center gap-3 py-1.5 border-b border-border/40 text-xs"
                         >
-                          <span className="flex-1 truncate font-mono text-muted-foreground" title={orig}>{orig}</span>
+                          <span className="flex-1 truncate font-mono text-muted-foreground" title={firstRename[0]}>{firstRename[0]}</span>
                           <ArrowRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                          <span className="flex-1 truncate font-mono text-primary font-medium" title={next}>{next}</span>
+                          <span className="flex-1 truncate font-mono text-primary font-medium" title={firstRename[1]}>{firstRename[1]}</span>
                         </div>
-                      ))}
+                      )}
+                      {renamesMap.size > 1 && (
+                        <div className="text-center py-2 text-[10px] text-muted-foreground">
+                          Showing one example from {renamesMap.size} folder changes.
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

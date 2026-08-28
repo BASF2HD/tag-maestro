@@ -150,7 +150,7 @@ export function SplitTextToTagsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex h-[min(720px,90vh)] max-w-3xl flex-col overflow-hidden p-0">
+      <DialogContent className="flex h-[min(600px,86vh)] max-w-3xl flex-col overflow-hidden p-0">
         <DialogHeader className="border-b border-border px-4 py-3">
           <div className="flex items-center gap-2">
             <div className="grid h-8 w-8 place-items-center rounded-md bg-primary/15 text-primary">
@@ -309,14 +309,17 @@ export function SplitTextToTagsDialog({
 
         <div className="min-h-0 flex-1 overflow-auto">
           {result.preview.length ? (
-            <div className="divide-y divide-border/60">
-              {result.preview.slice(0, 300).map((row) => (
-                <div key={row.id} className="px-4 py-2 text-xs">
-                  <div className="truncate font-medium">{row.filename}</div>
-                  <div className="truncate text-[11px] text-muted-foreground">{row.source}</div>
-                  <div className="mt-1 text-[11px] text-foreground">{row.changes.join(" · ")}</div>
-                </div>
-              ))}
+            <div className="px-4 py-2 text-xs">
+              <div className="truncate font-medium">{result.preview[0].filename}</div>
+              <div className="truncate text-[11px] text-muted-foreground">{result.preview[0].source}</div>
+              <div className="mt-1 truncate text-[11px] text-foreground">
+                {result.preview[0].changes.join(" · ")}
+              </div>
+              {result.preview.length > 1 && (
+                <p className="mt-2 text-[11px] text-muted-foreground">
+                  Showing one example from {result.preview.length} files changing.
+                </p>
+              )}
             </div>
           ) : (
             <div className="grid h-full min-h-24 place-items-center px-4 text-center text-xs text-muted-foreground">

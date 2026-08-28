@@ -115,3 +115,11 @@ export const Wand2 = icon(`<path d="m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0
   <path d="M7 8H3" />
   <path d="M21 16h-4" />
   <path d="M11 3H9" />`);
+export const GripHorizontal = icon(`<circle cx="5" cy="9" r="1" />
+  <circle cx="12" cy="9" r="1" />
+  <circle cx="19" cy="9" r="1" />
+  <circle cx="5" cy="15" r="1" />
+  <circle cx="12" cy="15" r="1" />
+  <circle cx="19" cy="15" r="1" />`);
+export const X = icon(`<path d="M18 6 6 18" />
+  <path d="m6 6 12 12" />`);

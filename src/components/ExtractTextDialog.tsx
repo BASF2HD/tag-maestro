@@ -14,6 +14,7 @@ import type { Mp3File, Mp3Tags } from "@/lib/mp3";
 
 export type ExtractTagKey = keyof Omit<Mp3Tags, "cover">;
 export type ExtractSourceKey = ExtractTagKey | "filename" | "folder" | "path";
+export type ExtractTargetKey = ExtractTagKey | "filename";
 
 type ExtractField = { key: ExtractSourceKey; label: string };
 
@@ -36,7 +37,7 @@ const SOURCE_FIELDS: ExtractField[] = [
 ];
 
 const TARGET_FIELDS: ExtractField[] = SOURCE_FIELDS.filter(
-  (field) => !["filename", "folder", "path"].includes(field.key),
+  (field) => !["folder", "path"].includes(field.key),
 );
 
 type PreviewRow = {
@@ -58,6 +59,15 @@ function sourceValue(file: Mp3File, source: ExtractSourceKey): string {
   return file.tags[source] || "";
 }
 
+function targetValue(file: Mp3File, target: ExtractTargetKey): string {
+  if (target === "filename") return file.renamedBase ?? baseName(file.file.name);
+  return file.tags[target] || "";
+}
+
+function filenameValue(value: string): string {
+  return value.replace(/[\\/:*?"<>|]/g, "_").trim();
+}
+
 export function ExtractTextDialog({
   open,
   onOpenChange,
@@ -67,10 +77,10 @@ export function ExtractTextDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   files: Mp3File[];
-  onApply: (field: ExtractTagKey, changes: Map<string, string>) => void;
+  onApply: (field: ExtractTargetKey, changes: Map<string, string>) => void;
 }) {
   const [source, setSource] = useState<ExtractSourceKey>("title");
-  const [target, setTarget] = useState<ExtractTagKey>("album");
+  const [target, setTarget] = useState<ExtractTargetKey>("album");
   const [findText, setFindText] = useState("");
   const [writeText, setWriteText] = useState("");
   const [caseSensitive, setCaseSensitive] = useState(false);
@@ -92,7 +102,7 @@ export function ExtractTextDialog({
     let skippedPopulated = 0;
     if (source === target) return { changes, preview, matches, skippedPopulated };
     const needle = findText.trim();
-    const value = writeText || needle;
+    const value = target === "filename" ? filenameValue(writeText || needle) : writeText || needle;
     if (!needle || !value) return { changes, preview, matches, skippedPopulated };
 
     const normalizedNeedle = caseSensitive ? needle : needle.toLocaleLowerCase();
@@ -102,7 +112,7 @@ export function ExtractTextDialog({
       if (!comparableSource.includes(normalizedNeedle)) continue;
       matches += 1;
 
-      const before = file.tags[target] || "";
+      const before = targetValue(file, target);
       if (before && !overwriteExisting) {
         skippedPopulated += 1;
         continue;
@@ -122,8 +132,8 @@ export function ExtractTextDialog({
   const restoreChanges = useMemo(() => {
     const changes = new Map<string, string>();
     for (const file of files) {
-      const current = file.tags[target] || "";
-      const original = file.original[target] || "";
+      const current = targetValue(file, target);
+      const original = target === "filename" ? baseName(file.file.name) : file.original[target] || "";
       if (current !== original) changes.set(file.id, original);
     }
     return changes;
@@ -131,11 +141,13 @@ export function ExtractTextDialog({
 
   const sourceLabel = SOURCE_FIELDS.find((field) => field.key === source)?.label ?? source;
   const targetLabel = TARGET_FIELDS.find((field) => field.key === target)?.label ?? target;
-  const valueLabel = writeText || findText.trim();
+  const valueLabel = target === "filename"
+    ? filenameValue(writeText || findText.trim())
+    : writeText || findText.trim();
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex h-[min(620px,86vh)] max-w-2xl flex-col overflow-hidden p-0">
+      <DialogContent className="flex h-[min(540px,86vh)] max-w-2xl flex-col overflow-hidden p-0">
         <DialogHeader className="border-b border-border px-4 py-3">
           <div className="flex items-center gap-2">
             <div className="grid h-8 w-8 place-items-center rounded-md bg-primary/15 text-primary">
@@ -170,12 +182,12 @@ export function ExtractTextDialog({
           </div>
           <div className="space-y-1">
             <Label htmlFor="extract-target" className="text-[11px] text-muted-foreground">
-              Put in tag
+              Put in
             </Label>
             <select
               id="extract-target"
               value={target}
-              onChange={(event) => setTarget(event.currentTarget.value as ExtractTagKey)}
+              onChange={(event) => setTarget(event.currentTarget.value as ExtractTargetKey)}
               className="h-8 w-full border border-input bg-background px-2 text-xs text-foreground outline-none focus:border-primary"
             >
               {TARGET_FIELDS.map((field) => (
@@ -247,7 +259,9 @@ export function ExtractTextDialog({
         <div className="min-h-0 flex-1 overflow-auto">
           {result.preview.length ? (
             <div className="divide-y divide-border/60">
-              {result.preview.slice(0, 300).map((row) => (
+              {(() => {
+                const row = result.preview[0];
+                return (
                 <div key={row.id} className="grid gap-1 px-4 py-2 text-xs sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
                   <div className="min-w-0">
                     <div className="truncate font-medium">{row.filename}</div>
@@ -259,10 +273,11 @@ export function ExtractTextDialog({
                     {targetLabel}: {row.before || "<empty>"} → {valueLabel}
                   </div>
                 </div>
-              ))}
-              {result.preview.length > 300 && (
+                );
+              })()}
+              {result.preview.length > 1 && (
                 <p className="px-4 py-2 text-[11px] text-muted-foreground">
-                  Showing the first 300 matching files.
+                  Showing one example from {result.preview.length} matching files.
                 </p>
               )}
             </div>

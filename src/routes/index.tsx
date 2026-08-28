@@ -56,7 +56,7 @@ import {
 } from "@/lib/ai.functions";
 import { FolderRenameDialog } from "@/components/FolderRenameDialog";
 import { BulkFieldEditDialog, type BulkFieldKey } from "@/components/BulkFieldEditDialog";
-import { ExtractTextDialog, type ExtractTagKey } from "@/components/ExtractTextDialog";
+import { ExtractTextDialog, type ExtractTargetKey } from "@/components/ExtractTextDialog";
 import {
   SplitTextToTagsDialog,
   type SplitTagPatch,
@@ -308,6 +308,7 @@ function TagMaestro() {
   const [converterOpen, setConverterOpen] = useState(false);
   const [extractTextOpen, setExtractTextOpen] = useState(false);
   const [splitTextOpen, setSplitTextOpen] = useState(false);
+  const [editorCollapsed, setEditorCollapsed] = useState(false);
   const [pendingLibrarySources, setPendingLibrarySources] = useState<StoredLibrarySource[]>([]);
   const [editorWidth, setEditorWidth] = useState(getSavedEditorWidth);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -860,13 +861,13 @@ function TagMaestro() {
     toast.success(`Updated ${changes.size} file${changes.size > 1 ? "s" : ""}`);
   }
 
-  function handleExtractText(field: ExtractTagKey, changes: Map<string, string>) {
+  function handleExtractText(field: ExtractTargetKey, changes: Map<string, string>) {
     setFiles((prev) =>
       prev.map((file) => {
         const value = changes.get(file.id);
-        return value === undefined
-          ? file
-          : { ...file, tags: { ...file.tags, [field]: value }, dirty: true };
+        if (value === undefined) return file;
+        if (field === "filename") return { ...file, renamedBase: value, dirty: true };
+        return { ...file, tags: { ...file.tags, [field]: value }, dirty: true };
       }),
     );
     toast.success(`Updated ${changes.size} file${changes.size === 1 ? "" : "s"}`);
@@ -1464,9 +1465,15 @@ function TagMaestro() {
             Restore library ({pendingLibrarySources.length})
           </Button>
         )}
-        <Button size="sm" variant="secondary" onClick={saveAll} disabled={!files.length}>
+        <Button
+          size="sm"
+          variant="secondary"
+          onClick={saveAll}
+          disabled={!files.length}
+          title={selectedFiles.length ? `Save ${selectedFiles.length} selected files` : "Save all loaded files"}
+        >
           <Save className="mr-1.5 h-4 w-4" />
-          Save {selectedFiles.length ? `(${selectedFiles.length})` : "all"}
+          Save all
         </Button>
         <ToolbarMenu
           label="Tools"
@@ -1525,12 +1532,6 @@ function TagMaestro() {
         />
 
         <div className="ml-auto flex items-center gap-2">
-          {busy && !importProgress && (
-            <span className="text-xs text-muted-foreground flex items-center gap-1.5">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              {busy}
-            </span>
-          )}
           <div className="relative">
             <Search className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
             <Input
@@ -1568,6 +1569,7 @@ function TagMaestro() {
               files={filtered}
               selected={selected}
               filter={filter}
+              status={busy && !importProgress ? busy : null}
               onToggle={(id, additive) => {
                 setSelected((prev) => {
                   const next = new Set(additive ? prev : []);
@@ -1585,51 +1587,69 @@ function TagMaestro() {
           )}
         </main>
 
-        <div
-          role="separator"
-          aria-label="Resize editor panel"
-          aria-orientation="vertical"
-          aria-valuemin={EDITOR_MIN_WIDTH}
-          aria-valuemax={EDITOR_MAX_WIDTH}
-          aria-valuenow={editorWidth}
-          tabIndex={0}
-          title="Drag to resize editor"
-          className="group relative z-20 flex w-2 shrink-0 cursor-col-resize items-stretch justify-center bg-transparent outline-none focus-visible:ring-1 focus-visible:ring-primary"
-          onPointerDown={startEditorResize}
-          onDoubleClick={() => setEditorWidth(EDITOR_DEFAULT_WIDTH)}
-          onKeyDown={(e) => {
-            if (e.key === "ArrowLeft") {
-              e.preventDefault();
-              adjustEditorWidth(e.shiftKey ? 40 : 16);
-            } else if (e.key === "ArrowRight") {
-              e.preventDefault();
-              adjustEditorWidth(e.shiftKey ? -40 : -16);
-            } else if (e.key === "Home") {
-              e.preventDefault();
-              setEditorWidth(EDITOR_MIN_WIDTH);
-            } else if (e.key === "End") {
-              e.preventDefault();
-              setEditorWidth(EDITOR_MAX_WIDTH);
-            }
-          }}
-        >
-          <span className="w-px bg-border transition-colors group-hover:bg-primary group-focus-visible:bg-primary" />
-        </div>
+        {editorCollapsed ? (
+          <div className="relative z-20 flex w-7 shrink-0 items-stretch justify-center border-l border-border bg-sidebar/40">
+            <button
+              type="button"
+              className="grid h-full w-full place-items-center text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
+              aria-label="Show editor"
+              title="Show editor"
+              aria-expanded={false}
+              onClick={() => setEditorCollapsed(false)}
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+          </div>
+        ) : (
+          <>
+            <div
+              role="separator"
+              aria-label="Resize editor panel"
+              aria-orientation="vertical"
+              aria-valuemin={EDITOR_MIN_WIDTH}
+              aria-valuemax={EDITOR_MAX_WIDTH}
+              aria-valuenow={editorWidth}
+              tabIndex={0}
+              title="Drag to resize editor"
+              className="group relative z-20 flex w-2 shrink-0 cursor-col-resize items-stretch justify-center bg-transparent outline-none focus-visible:ring-1 focus-visible:ring-primary"
+              onPointerDown={startEditorResize}
+              onDoubleClick={() => setEditorWidth(EDITOR_DEFAULT_WIDTH)}
+              onKeyDown={(e) => {
+                if (e.key === "ArrowLeft") {
+                  e.preventDefault();
+                  adjustEditorWidth(e.shiftKey ? 40 : 16);
+                } else if (e.key === "ArrowRight") {
+                  e.preventDefault();
+                  adjustEditorWidth(e.shiftKey ? -40 : -16);
+                } else if (e.key === "Home") {
+                  e.preventDefault();
+                  setEditorWidth(EDITOR_MIN_WIDTH);
+                } else if (e.key === "End") {
+                  e.preventDefault();
+                  setEditorWidth(EDITOR_MAX_WIDTH);
+                }
+              }}
+            >
+              <span className="w-px bg-border transition-colors group-hover:bg-primary group-focus-visible:bg-primary" />
+            </div>
 
-        {/* Editor panel */}
-        <aside
-          className="shrink-0 bg-sidebar/40 flex flex-col overflow-hidden"
-          style={{ width: editorWidth }}
-        >
-          <EditorPanel
-            tags={panelTags}
-            count={selectedFiles.length}
-            selectedFiles={selectedFiles}
-            onChange={(key, value) => applyToSelected({ [key]: value })}
-            onCoverPick={onCoverFile}
-            onCoverClear={() => applyToSelected({ cover: undefined })}
-          />
-        </aside>
+            {/* Editor panel */}
+            <aside
+              className="shrink-0 bg-sidebar/40 flex flex-col overflow-hidden"
+              style={{ width: editorWidth }}
+            >
+              <EditorPanel
+                tags={panelTags}
+                count={selectedFiles.length}
+                selectedFiles={selectedFiles}
+                onChange={(key, value) => applyToSelected({ [key]: value })}
+                onCoverPick={onCoverFile}
+                onCoverClear={() => applyToSelected({ cover: undefined })}
+                onCollapse={() => setEditorCollapsed(true)}
+              />
+            </aside>
+          </>
+        )}
       </div>
     </div>
   );
@@ -1807,6 +1827,7 @@ function FileTable({
   files,
   selected,
   filter,
+  status,
   onToggle,
   onSelectAll,
   onEdit,
@@ -1817,6 +1838,7 @@ function FileTable({
   files: Mp3File[];
   selected: Set<string>;
   filter: string;
+  status?: string | null;
   onToggle: (id: string, additive: boolean) => void;
   onSelectAll: (selected: Set<string>) => void;
   onEdit: (id: string, key: TagKey, value: string) => void;
@@ -1894,7 +1916,7 @@ function FileTable({
 
   // Pagination states
   const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(100);
+  const [pageSize, setPageSize] = useState(1000);
   const [rowMenu, setRowMenu] = useState<{ id: string; x: number; y: number } | null>(null);
 
   // Reset current page when the files count, search filter, or sort key/order changes
@@ -2162,13 +2184,13 @@ function FileTable({
         <table className="w-full border-collapse table-fixed bg-white text-xs text-slate-950 dark:bg-background dark:text-foreground">
           <thead className="sticky top-0 z-10 border-b border-slate-300 bg-[#f3f4f6] text-[11px] leading-none text-slate-700 dark:border-border dark:bg-secondary/80 dark:text-muted-foreground">
             <tr className="h-[19px] border-b border-slate-300 bg-[#f3f4f6] dark:border-border dark:bg-secondary/30">
-              <th style={{ width: 36, minWidth: 36, maxWidth: 36 }} className="h-[19px] px-2 py-0 text-left">
+              <th style={{ width: 36, minWidth: 36, maxWidth: 36 }} className="h-[19px] align-middle px-2 py-0 text-left">
                 <input
                   type="checkbox"
                   checked={allPageSelected}
                   onChange={(e) => handleHeaderCheckboxChange(e.currentTarget.checked)}
                   aria-label="Select page"
-                  className="h-[11px] w-[11px] accent-primary"
+                  className="h-[11px] w-[11px] align-middle accent-primary"
                 />
               </th>
               {visible.map((col) => {
@@ -2254,14 +2276,14 @@ function FileTable({
                   onClick={(e) => onToggle(f.id, e.metaKey || e.ctrlKey || e.shiftKey)}
                   onContextMenu={(e) => openRowMenu(e, f)}
                 >
-                  <td style={{ width: 36, minWidth: 36, maxWidth: 36 }} className="px-2 py-0.5">
+                  <td style={{ width: 36, minWidth: 36, maxWidth: 36 }} className="align-middle px-2 py-0.5">
                     <input
                       type="checkbox"
                       checked={isSel}
                       onChange={() => onToggle(f.id, true)}
                       onClick={(e) => e.stopPropagation()}
                       aria-label="Select"
-                      className="h-3 w-3 accent-primary"
+                      className="h-3 w-3 align-middle accent-primary"
                     />
                   </td>
                   {visible.map((col) => (
@@ -2370,8 +2392,8 @@ function FileTable({
       )}
 
       {/* Pagination Footer */}
-      <div className="border-t border-border px-4 py-2 flex items-center justify-between text-xs bg-sidebar/40 backdrop-blur select-none h-11 shrink-0">
-        <div className="text-muted-foreground flex items-center gap-1">
+      <div className="relative border-t border-border px-4 py-2 flex items-center justify-between text-xs bg-sidebar/40 backdrop-blur select-none h-11 shrink-0">
+        <div className="min-w-0 flex flex-1 items-center gap-1 text-muted-foreground">
           <span>Showing</span>
           <span className="font-semibold text-foreground">
             {files.length === 0 ? 0 : (activePage - 1) * pageSize + 1}
@@ -2385,8 +2407,15 @@ function FileTable({
           <span>tracks</span>
         </div>
 
-        {totalPages > 1 && (
-          <div className="flex items-center gap-1.5">
+        <div className="flex min-w-0 flex-1 items-center justify-center gap-2">
+          {status && (
+            <span className="flex min-w-0 max-w-[260px] items-center gap-1.5 truncate text-muted-foreground" title={status}>
+              <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
+              <span className="truncate">{status}</span>
+            </span>
+          )}
+          {totalPages > 1 && (
+            <div className="flex items-center gap-1.5">
             <Button
               variant="outline"
               size="icon"
@@ -2433,10 +2462,16 @@ function FileTable({
             >
               <ChevronsRight className="h-4 w-4" />
             </Button>
-          </div>
-        )}
+            </div>
+          )}
+        </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-1 items-center justify-end gap-2">
+          {selected.size > 0 && (
+            <span className="text-muted-foreground">
+              {selected.size} selected
+            </span>
+          )}
           <span className="text-muted-foreground">Show:</span>
           <select
             value={pageSize}
@@ -2450,6 +2485,7 @@ function FileTable({
             <option value={100}>100 per page</option>
             <option value={250}>250 per page</option>
             <option value={500}>500 per page</option>
+            <option value={1000}>1000 per page</option>
           </select>
         </div>
       </div>
@@ -2801,6 +2837,7 @@ function EditorPanel({
   onChange,
   onCoverPick,
   onCoverClear,
+  onCollapse,
 }: {
   tags: Mp3Tags;
   count: number;
@@ -2808,6 +2845,7 @@ function EditorPanel({
   onChange: (key: TagKey, value: string) => void;
   onCoverPick: (file: File) => void;
   onCoverClear: () => void;
+  onCollapse: () => void;
 }) {
   const coverInput = useRef<HTMLInputElement>(null);
   const [showCoverArt, setShowCoverArt] = useState(true);
@@ -2839,18 +2877,29 @@ function EditorPanel({
                 : `Editing ${count} tracks`}
           </p>
         </div>
-        <button
-          type="button"
-          className="grid h-6 w-6 shrink-0 place-items-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
-          aria-label={showCoverArt ? "Hide cover art" : "Show cover art"}
-          title={showCoverArt ? "Hide cover art" : "Show cover art"}
-          aria-expanded={showCoverArt}
-          onClick={() => setShowCoverArt((value) => !value)}
-        >
-          <ChevronDown
-            className={`h-3.5 w-3.5 transition-transform ${showCoverArt ? "" : "-rotate-90"}`}
-          />
-        </button>
+        <div className="flex shrink-0 items-center gap-0.5">
+          <button
+            type="button"
+            className="grid h-6 w-6 place-items-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
+            aria-label={showCoverArt ? "Hide cover art" : "Show cover art"}
+            title={showCoverArt ? "Hide cover art" : "Show cover art"}
+            aria-expanded={showCoverArt}
+            onClick={() => setShowCoverArt((value) => !value)}
+          >
+            <ChevronDown
+              className={`h-3.5 w-3.5 transition-transform ${showCoverArt ? "" : "-rotate-90"}`}
+            />
+          </button>
+          <button
+            type="button"
+            className="grid h-6 w-6 place-items-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
+            aria-label="Hide editor"
+            title="Hide editor"
+            onClick={onCollapse}
+          >
+            <ChevronRight className="h-3.5 w-3.5" />
+          </button>
+        </div>
       </div>
 
       {showCoverArt && (
