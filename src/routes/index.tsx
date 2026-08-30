@@ -1593,7 +1593,7 @@ function TagMaestro() {
                 selectedFiles={selectedFiles}
                 onChange={(key, value) => applyToSelected({ [key]: value })}
                 onCoverPick={onCoverFile}
-                onCoverClear={() => applyToSelected({ cover: undefined })}
+                onCoverDelete={() => applyToSelected({ cover: undefined })}
                 onCollapse={() => setEditorCollapsed(true)}
               />
             </aside>
@@ -2874,7 +2874,7 @@ function EditorPanel({
   selectedFiles,
   onChange,
   onCoverPick,
-  onCoverClear,
+  onCoverDelete,
   onCollapse,
 }: {
   tags: Mp3Tags;
@@ -2882,7 +2882,7 @@ function EditorPanel({
   selectedFiles: Mp3File[];
   onChange: (key: TagKey, value: string) => void;
   onCoverPick: (file: File) => void;
-  onCoverClear: () => void;
+  onCoverDelete: () => void;
   onCollapse: () => void;
 }) {
   const coverInput = useRef<HTMLInputElement>(null);
@@ -2971,10 +2971,12 @@ function EditorPanel({
                   <Button
                     size="sm"
                     variant="ghost"
-                    className="h-6 px-2 text-[11px]"
-                    onClick={onCoverClear}
+                    className="h-6 px-2 text-[11px] text-destructive hover:bg-destructive/10 hover:text-destructive"
+                    onClick={onCoverDelete}
+                    title="Delete cover art"
                   >
-                    Clear
+                    <Trash2 className="mr-1 h-3 w-3" />
+                    Delete
                   </Button>
                 )}
               </div>
