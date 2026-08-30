@@ -1617,26 +1617,25 @@ function ProgressOrStatus({
     const hasNums = typeof importProgress.loaded === "number" && typeof importProgress.total === "number";
     const pct = hasNums && importProgress.total ? Math.round((importProgress.loaded! / importProgress.total!) * 100) : 0;
     return (
-      <span className="flex min-w-0 items-center gap-2 text-muted-foreground">
+      <div className="flex min-w-0 max-w-[320px] items-center gap-2 text-muted-foreground text-xs">
         <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-primary" />
-        <span className="truncate text-xs font-medium">{importProgress.title}</span>
-        {hasNums && (
+        <span className="truncate font-medium text-foreground">{importProgress.title}</span>
+        {hasNums ? (
           <>
-            <div className="h-1.5 w-24 overflow-hidden rounded-sm bg-muted shrink-0">
+            <div className="h-1.5 w-16 overflow-hidden rounded-full bg-muted shrink-0">
               <div className="h-full bg-primary transition-[width]" style={{ width: `${pct}%` }} />
             </div>
-            <span className="text-[11px] whitespace-nowrap">
-              {importProgress.loaded} / {importProgress.total}
+            <span className="text-[11px] whitespace-nowrap shrink-0 text-foreground font-mono">
+              {importProgress.loaded}/{importProgress.total}
             </span>
           </>
-        )}
-        {!hasNums && (
+        ) : (
           <span className="truncate text-[11px]">{importProgress.message}</span>
         )}
         {onCancel && (
           <button
             type="button"
-            className="ml-1 rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary shrink-0"
+            className="ml-0.5 rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary shrink-0"
             onClick={onCancel}
             title="Cancel import"
             aria-label="Cancel import"
@@ -1644,19 +1643,19 @@ function ProgressOrStatus({
             <X className="h-3.5 w-3.5" />
           </button>
         )}
-      </span>
+      </div>
     );
   }
 
   if (status) {
     return (
-      <span className="flex min-w-0 max-w-[260px] items-center gap-1.5 truncate text-muted-foreground" title={status}>
-        <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
+      <div className="flex min-w-0 max-w-[260px] items-center gap-1.5 truncate text-muted-foreground text-xs" title={status}>
+        <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-primary" />
         <span className="truncate">{status}</span>
         {onCancel && (
           <button
             type="button"
-            className="ml-1 rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary shrink-0"
+            className="ml-0.5 rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary shrink-0"
             onClick={onCancel}
             title="Cancel"
             aria-label="Cancel"
@@ -1664,7 +1663,7 @@ function ProgressOrStatus({
             <X className="h-3.5 w-3.5" />
           </button>
         )}
-      </span>
+      </div>
     );
   }
 
@@ -2406,8 +2405,9 @@ function FileTable({
       )}
 
       {/* Pagination Footer */}
-      <div className="relative border-t border-border px-4 py-2 flex items-center justify-between text-xs bg-sidebar/40 backdrop-blur select-none h-11 shrink-0">
-        <div className="min-w-0 flex flex-1 items-center gap-1.5 text-muted-foreground">
+      <div className="relative border-t border-border px-3 py-1.5 flex items-center justify-between text-xs bg-sidebar/40 backdrop-blur select-none h-11 shrink-0 gap-3">
+        {/* Left: Track counters and Selection */}
+        <div className="flex items-center gap-1.5 text-muted-foreground shrink-0 whitespace-nowrap">
           <span>Showing</span>
           <span className="font-semibold text-foreground">
             {files.length === 0 ? 0 : (activePage - 1) * pageSize + 1}
@@ -2422,13 +2422,13 @@ function FileTable({
           {selected.size > 0 && (
             <>
               <span className="mx-1 text-border">·</span>
-              <span>
-                <strong className="text-foreground">{selected.size}</strong> selected
+              <span className="font-medium text-foreground">
+                {selected.size} selected
               </span>
               <Button
-                variant="ghost"
+                variant="outline"
                 size="sm"
-                className="h-6 px-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-accent/60"
+                className="h-6 px-1.5 text-[11px] border-border/80 bg-background/60 hover:bg-accent hover:text-foreground ml-0.5"
                 onClick={handleClearSelection}
                 title="Clear selection"
               >
@@ -2438,65 +2438,94 @@ function FileTable({
           )}
         </div>
 
-        <div className="flex min-w-0 flex-1 items-center justify-center gap-2">
+        {/* Center: Progress / Status or Pagination */}
+        <div className="flex min-w-0 flex-1 items-center justify-center gap-2 overflow-hidden px-2">
           <ProgressOrStatus
             importProgress={importProgress}
             status={status}
             onCancel={onCancelImport}
           />
-          {totalPages > 1 && (
-            <div className="flex items-center gap-1.5">
-            <Button
-              variant="outline"
-              size="icon"
-              className="h-7 w-7 rounded-md border-border bg-background"
-              onClick={() => setCurrentPage(1)}
-              disabled={activePage === 1}
-              title="First Page"
-            >
-              <ChevronsLeft className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="outline"
-              size="icon"
-              className="h-7 w-7 rounded-md border-border bg-background"
-              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-              disabled={activePage === 1}
-              title="Previous Page"
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-            
-            <span className="mx-2 text-muted-foreground">
-              Page <span className="font-medium text-foreground">{activePage}</span> of{" "}
-              <span className="font-medium text-foreground">{totalPages}</span>
-            </span>
+          {!importProgress && !status && totalPages > 1 && (
+            <div className="flex items-center gap-1">
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-6 w-6 rounded border-border bg-background"
+                onClick={() => setCurrentPage(1)}
+                disabled={activePage === 1}
+                title="First Page"
+              >
+                <ChevronsLeft className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-6 w-6 rounded border-border bg-background"
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                disabled={activePage === 1}
+                title="Previous Page"
+              >
+                <ChevronLeft className="h-3.5 w-3.5" />
+              </Button>
+              
+              <span className="mx-1.5 text-muted-foreground whitespace-nowrap">
+                Page <span className="font-medium text-foreground">{activePage}</span> of{" "}
+                <span className="font-medium text-foreground">{totalPages}</span>
+              </span>
 
-            <Button
-              variant="outline"
-              size="icon"
-              className="h-7 w-7 rounded-md border-border bg-background"
-              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-              disabled={activePage === totalPages}
-              title="Next Page"
-            >
-              <ChevronRight className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="outline"
-              size="icon"
-              className="h-7 w-7 rounded-md border-border bg-background"
-              onClick={() => setCurrentPage(totalPages)}
-              disabled={activePage === totalPages}
-              title="Last Page"
-            >
-              <ChevronsRight className="h-4 w-4" />
-            </Button>
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-6 w-6 rounded border-border bg-background"
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                disabled={activePage === totalPages}
+                title="Next Page"
+              >
+                <ChevronRight className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-6 w-6 rounded border-border bg-background"
+                onClick={() => setCurrentPage(totalPages)}
+                disabled={activePage === totalPages}
+                title="Last Page"
+              >
+                <ChevronsRight className="h-3.5 w-3.5" />
+              </Button>
             </div>
           )}
         </div>
 
-        <div className="flex flex-1 items-center justify-end gap-2">
+        {/* Right: Compact pagination (when loading) + Page size dropdown */}
+        <div className="flex items-center justify-end gap-2 shrink-0 whitespace-nowrap">
+          {(importProgress || status) && totalPages > 1 && (
+            <div className="hidden lg:flex items-center gap-1 mr-1">
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-6 w-6 rounded border-border bg-background"
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                disabled={activePage === 1}
+                title="Previous Page"
+              >
+                <ChevronLeft className="h-3.5 w-3.5" />
+              </Button>
+              <span className="mx-1 text-muted-foreground text-[11px]">
+                {activePage}/{totalPages}
+              </span>
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-6 w-6 rounded border-border bg-background"
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                disabled={activePage === totalPages}
+                title="Next Page"
+              >
+                <ChevronRight className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          )}
           <span className="text-muted-foreground">Show:</span>
           <select
             value={pageSize}
