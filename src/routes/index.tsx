@@ -344,6 +344,10 @@ function TagMaestro() {
     [files, selected],
   );
 
+  const hasDirtyFiles = useMemo(() => {
+    return files.some((f) => f.dirty);
+  }, [files]);
+
   useEffect(() => {
     const first = selectedFiles[0];
     if (!first || first.tags.cover || coverProbeIds.current.has(first.id)) return;
@@ -869,7 +873,13 @@ function TagMaestro() {
     const origFolder = target.folderName;
     setFiles((prev) =>
       prev.map((f) =>
-        f.folderName === origFolder ? { ...f, editedFolderName: newName } : f,
+        f.folderName === origFolder
+          ? {
+              ...f,
+              editedFolderName: newName,
+              dirty: f.folderName !== newName ? true : f.dirty,
+            }
+          : f,
       ),
     );
   }
@@ -900,7 +910,13 @@ function TagMaestro() {
     setFiles((prev) =>
       prev.map((f) => {
         const newName = renames.get(f.editedFolderName);
-        return newName !== undefined ? { ...f, editedFolderName: newName } : f;
+        return newName !== undefined
+          ? {
+              ...f,
+              editedFolderName: newName,
+              dirty: f.folderName !== newName ? true : f.dirty,
+            }
+          : f;
       }),
     );
     toast.success(`Renamed ${renames.size} folder${renames.size > 1 ? "s" : ""}`);
@@ -1208,6 +1224,13 @@ function TagMaestro() {
         const blob = await writeTagsToBlob(m);
         const name = renamedFilename(m, pattern);
         triggerDownload(blob, name);
+        setFiles((prev) =>
+          prev.map((f) =>
+            f.id === m.id
+              ? { ...f, dirty: false, original: cloneTags(f.tags) }
+              : f,
+          ),
+        );
         toast.info("Browser file input is read-only, so this file was exported");
       } else {
         const zip = new JSZip();
@@ -1220,6 +1243,14 @@ function TagMaestro() {
         }
         const zipBlob = await zip.generateAsync({ type: "blob" });
         triggerDownload(zipBlob, "tagmaestro-export.zip");
+        const targetIds = new Set(targets.map((m) => m.id));
+        setFiles((prev) =>
+          prev.map((f) =>
+            targetIds.has(f.id)
+              ? { ...f, dirty: false, original: cloneTags(f.tags) }
+              : f,
+          ),
+        );
         toast.info("These files were opened read-only, so TagMaestro exported a zip");
       }
     } catch (e: any) {
@@ -1396,10 +1427,16 @@ function TagMaestro() {
         )}
         <Button
           size="sm"
-          variant="secondary"
+          variant={hasDirtyFiles ? "default" : "secondary"}
           onClick={saveAll}
-          disabled={!files.length}
-          title={selectedFiles.length ? `Save ${selectedFiles.length} selected files` : "Save all loaded files"}
+          disabled={!hasDirtyFiles || Boolean(busy)}
+          title={
+            !hasDirtyFiles
+              ? "No unsaved changes"
+              : selectedFiles.some((f) => f.dirty)
+                ? `Save changes in selected files`
+                : "Save all unsaved changes"
+          }
         >
           <Save className="mr-1.5 h-4 w-4" />
           Save all
