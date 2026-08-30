@@ -1,5 +1,4 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useServerFn } from "@tanstack/react-start";
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import JSZip from "jszip";
 import { Toaster, toast } from "@/components/ui/sonner";
@@ -12,7 +11,6 @@ import {
   Music4,
   Upload,
   Save,
-  Sparkles,
   Wand2,
   Image as ImageIcon,
   FileText,
@@ -49,12 +47,6 @@ import {
   type Mp3Tags,
   type FileMeta,
 } from "@/lib/mp3";
-import {
-  aiParseFilename,
-  aiIdentify,
-  aiCleanup,
-  aiGenerateCover,
-} from "@/lib/ai.functions";
 import { FolderRenameDialog } from "@/components/FolderRenameDialog";
 import { BulkFieldEditDialog, type BulkFieldKey } from "@/components/BulkFieldEditDialog";
 import { ExtractTextDialog, type ExtractTargetKey } from "@/components/ExtractTextDialog";
@@ -342,11 +334,6 @@ function TagMaestro() {
     setImportProgress(null);
     toast.info("Import cancelled");
   }, []);
-
-  const parseFilename = useServerFn(aiParseFilename);
-  const identify = useServerFn(aiIdentify);
-  const cleanup = useServerFn(aiCleanup);
-  const genCover = useServerFn(aiGenerateCover);
 
   useEffect(() => {
     localStorage.setItem("editorWidth", String(editorWidth));
@@ -1242,135 +1229,6 @@ function TagMaestro() {
     }
   }
 
-  // === AI actions ===
-
-  async function runAiAutofill() {
-    const targets = selectedFiles.length ? selectedFiles : files;
-    if (!targets.length) return toast.info("Select files first");
-    setBusy(`AI parsing ${targets.length} filename${targets.length > 1 ? "s" : ""}…`);
-    let applied = 0;
-    try {
-      for (const m of targets) {
-        const out = await parseFilename({ data: { filename: m.file.name } });
-        if (!out.ok) {
-          toast.error(aiErrorMessage(out));
-          return;
-        }
-        setFiles((prev) =>
-          prev.map((f) =>
-            f.id === m.id
-              ? { ...f, tags: { ...f.tags, ...pickNonEmpty(out.tags) }, dirty: true }
-              : f,
-          ),
-        );
-        applied += 1;
-      }
-      toast.success(`Filled ${applied} file${applied === 1 ? "" : "s"} from filenames`);
-    } catch (e: any) {
-      toast.error(aiErrorMessage(e));
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function runAiIdentify() {
-    const targets = selectedFiles.length ? selectedFiles : files;
-    if (!targets.length) return toast.info("Select files first");
-    setBusy(`AI identifying ${targets.length} track${targets.length > 1 ? "s" : ""}…`);
-    let applied = 0;
-    try {
-      for (const m of targets) {
-        const out = await identify({
-          data: {
-            filename: m.file.name,
-            current: tagsToRecord(m.tags),
-          },
-        });
-        if (!out.ok) {
-          toast.error(aiErrorMessage(out));
-          return;
-        }
-        setFiles((prev) =>
-          prev.map((f) =>
-            f.id === m.id
-              ? { ...f, tags: { ...f.tags, ...pickNonEmpty(out.tags) }, dirty: true }
-              : f,
-          ),
-        );
-        applied += 1;
-      }
-      toast.success(`Identified ${applied} track${applied === 1 ? "" : "s"}`);
-    } catch (e: any) {
-      toast.error(aiErrorMessage(e));
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function runAiCleanup() {
-    const targets = selectedFiles.length ? selectedFiles : files;
-    if (!targets.length) return toast.info("Select files first");
-    setBusy(`AI cleaning ${targets.length} track${targets.length > 1 ? "s" : ""}…`);
-    let applied = 0;
-    try {
-      for (const m of targets) {
-        const out = await cleanup({ data: { tags: tagsToRecord(m.tags) } });
-        if (!out.ok) {
-          toast.error(aiErrorMessage(out));
-          return;
-        }
-        setFiles((prev) =>
-          prev.map((f) =>
-            f.id === m.id
-              ? { ...f, tags: { ...f.tags, ...pickNonEmpty(out.tags) }, dirty: true }
-              : f,
-          ),
-        );
-        applied += 1;
-      }
-      toast.success(`Cleaned ${applied} track${applied === 1 ? "" : "s"}`);
-    } catch (e: any) {
-      toast.error(aiErrorMessage(e));
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function runAiCover() {
-    const targets = selectedFiles.length ? selectedFiles : files;
-    if (!targets.length) return toast.info("Select files first");
-    setBusy(`Generating ${targets.length} cover${targets.length > 1 ? "s" : ""}…`);
-    try {
-      for (const m of targets) {
-        const out = await genCover({
-          data: {
-            title: m.tags.title,
-            artist: m.tags.artist,
-            album: m.tags.album,
-            genre: m.tags.genre,
-          },
-        });
-        if (!out.ok) {
-          toast.error(aiErrorMessage(out));
-          return;
-        }
-        const cover = dataUrlToCover(out.dataUrl);
-        if (cover) {
-          setFiles((prev) =>
-            prev.map((f) =>
-              f.id === m.id ? { ...f, tags: { ...f.tags, cover }, dirty: true } : f,
-            ),
-          );
-        }
-      }
-      toast.success("Cover art generated");
-    } catch (e: any) {
-      toast.error(aiErrorMessage(e));
-    } finally {
-      setBusy(null);
-    }
-  }
-
   function onCoverFile(fileInput: File) {
     if (!selected.size) return;
     const reader = new FileReader();
@@ -1564,42 +1422,6 @@ function TagMaestro() {
           selected={selected.size}
           onRemoveSelected={() => void removeSelected()}
           onRemoveAll={() => void removeAll()}
-        />
-
-        <Separator orientation="vertical" className="h-7 mx-1" />
-
-        <div className="hidden 2xl:flex items-center gap-1">
-          <span className="text-[11px] uppercase tracking-wider text-muted-foreground mr-1">
-            AI
-          </span>
-          <Button size="sm" variant="ghost" onClick={runAiAutofill} disabled={!files.length}>
-            <FileText className="mr-1.5 h-4 w-4" />
-            From filename
-          </Button>
-          <Button size="sm" variant="ghost" onClick={runAiIdentify} disabled={!files.length}>
-            <Sparkles className="mr-1.5 h-4 w-4" />
-            Identify
-          </Button>
-          <Button size="sm" variant="ghost" onClick={runAiCleanup} disabled={!files.length}>
-            <Wand2 className="mr-1.5 h-4 w-4" />
-            Clean up
-          </Button>
-          <Button size="sm" variant="ghost" onClick={runAiCover} disabled={!files.length}>
-            <ImageIcon className="mr-1.5 h-4 w-4" />
-            Cover art
-          </Button>
-        </div>
-        <ToolbarMenu
-          label="AI"
-          icon={Sparkles}
-          disabled={!files.length}
-          className="2xl:hidden"
-          items={[
-            { label: "From filename", onSelect: () => void runAiAutofill() },
-            { label: "Identify", onSelect: () => void runAiIdentify() },
-            { label: "Clean up", onSelect: () => void runAiCleanup() },
-            { label: "Cover art", onSelect: () => void runAiCover() },
-          ]}
         />
 
         <div className="ml-auto flex items-center gap-2">
@@ -1849,10 +1671,10 @@ function EmptyState({
           </Button>
         </div>
         <div className="mt-4 grid grid-cols-2 gap-2 text-left text-xs text-muted-foreground">
-          <Feature icon={FileText} title="Auto-fill" desc="Parse tags from filenames" />
-          <Feature icon={Sparkles} title="Identify" desc="Find missing metadata" />
-          <Feature icon={Wand2} title="Clean up" desc="Normalize titles & artists" />
-          <Feature icon={ImageIcon} title="Cover art" desc="Generate album covers" />
+          <Feature icon={FileText} title="Tag Converter" desc="Format patterns & filename tags" />
+          <Feature icon={Wand2} title="Bulk Edit" desc="Find/replace, case & text tools" />
+          <Feature icon={FolderOpen} title="Folder Rename" desc="Batch rename music folders" />
+          <Feature icon={ImageIcon} title="Cover Art" desc="View & update album covers" />
         </div>
       </div>
     </div>
@@ -3267,11 +3089,6 @@ function TagFieldCombo({
 
 // ==== helpers ====
 
-function tagsToRecord(t: Mp3Tags): Record<string, string> {
-  const { cover: _c, ...rest } = t;
-  return rest as Record<string, string>;
-}
-
 function renamedFilename(m: Mp3File, pattern: string): string {
   const orig = m.file.name;
   const dot = orig.lastIndexOf(".");
@@ -3292,23 +3109,6 @@ function replacePathFilename(path: string, filename: string): string {
   if (!path) return filename;
   const slash = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
   return slash >= 0 ? path.slice(0, slash + 1) + filename : filename;
-}
-
-function aiErrorMessage(e: unknown): string {
-  if (e && typeof e === "object" && "error" in e && typeof (e as { error?: unknown }).error === "string") {
-    const err = e as { error: string; status?: number; requestId?: string };
-    return err.requestId ? `${err.error} (${err.requestId})` : err.error;
-  }
-  if (e instanceof Error && e.message) return e.message;
-  return "AI failed. Please try again.";
-}
-
-function pickNonEmpty(o: Record<string, unknown>): Partial<Mp3Tags> {
-  const out: Partial<Mp3Tags> = {};
-  for (const [k, v] of Object.entries(o)) {
-    if (typeof v === "string" && v.trim()) (out as any)[k] = v.trim();
-  }
-  return out;
 }
 
 function triggerDownload(blob: Blob, name: string) {
