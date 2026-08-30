@@ -33,6 +33,7 @@ import {
   Moon,
   ChevronDown,
   Trash2,
+  X,
 } from "@/components/icons";
 import {
   readMp3,
@@ -231,18 +232,34 @@ function asFolderEntry(item: File | FolderFileEntry): FolderFileEntry {
 
 async function collectDirectoryEntries(
   directoryHandle: FileSystemDirectoryHandle,
+  onProgress?: (count: number, currentDir: string) => void,
+  shouldCancel?: () => boolean,
 ): Promise<FolderFileEntry[]> {
   const entries: FolderFileEntry[] = [];
+  const pauseForPaint = () => new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+  let lastPaintTime = Date.now();
 
   async function walk(handle: FileSystemDirectoryHandle, path: string) {
+    if (shouldCancel?.()) return;
     for await (const [name, child] of (handle as any).entries()) {
+      if (shouldCancel?.()) return;
       const relativePath = path ? `${path}/${name}` : name;
       if (child.kind === "directory") {
+        onProgress?.(entries.length, relativePath);
+        if (Date.now() - lastPaintTime > 150) {
+          lastPaintTime = Date.now();
+          await pauseForPaint();
+        }
         await walk(child as FileSystemDirectoryHandle, relativePath);
       } else if (child.kind === "file") {
         const fileHandle = child as FileSystemFileHandle;
         const file = await fileHandle.getFile();
         entries.push({ file, relativePath, handle: fileHandle, parentHandle: handle });
+        if (entries.length % 50 === 0 || Date.now() - lastPaintTime > 150) {
+          lastPaintTime = Date.now();
+          onProgress?.(entries.length, path);
+          await pauseForPaint();
+        }
       }
     }
   }
@@ -317,6 +334,14 @@ function TagMaestro() {
   const coverProbeIds = useRef<Set<string>>(new Set());
   const libraryRestoreStarted = useRef(false);
   const libraryLoadGeneration = useRef(0);
+  const isPickingRef = useRef(false);
+
+  const cancelImport = useCallback(() => {
+    libraryLoadGeneration.current += 1;
+    setBusy(null);
+    setImportProgress(null);
+    toast.info("Import cancelled");
+  }, []);
 
   const parseFilename = useServerFn(aiParseFilename);
   const identify = useServerFn(aiIdentify);
@@ -373,6 +398,7 @@ function TagMaestro() {
     return files.filter(
       (f) =>
         f.file.name.toLowerCase().includes(q) ||
+        (f.renamedBase && f.renamedBase.toLowerCase().includes(q)) ||
         f.tags.title.toLowerCase().includes(q) ||
         f.tags.artist.toLowerCase().includes(q) ||
         f.tags.album.toLowerCase().includes(q) ||
@@ -477,18 +503,22 @@ function TagMaestro() {
   }, [handleAdd]);
 
   const openFilePicker = useCallback(async () => {
+    if (isPickingRef.current) return;
     const picker = (window as DirectoryPickerWindow).showOpenFilePicker;
     if (!picker) {
       fileInput.current?.click();
       return;
     }
+    isPickingRef.current = true;
     try {
       const handles = await picker.call(window, { multiple: true });
       await loadFileHandles(handles);
-    } catch (error) {
-      if ((error as { name?: string })?.name !== "AbortError") {
-        toast.error((error as { message?: string })?.message || "File open failed");
+    } catch (error: any) {
+      if (error?.name !== "AbortError" && !error?.message?.includes("already active")) {
+        toast.error(error?.message || "File open failed");
       }
+    } finally {
+      isPickingRef.current = false;
     }
   }, [loadFileHandles]);
 
@@ -670,13 +700,27 @@ function TagMaestro() {
       await saveLibrarySource(source);
       setPendingLibrarySources((prev) => prev.filter((item) => item.id !== source.id));
       setFiles((prev) => prev.filter((file) => file.librarySourceId !== source.id));
-      setBusy("Opening folder…");
+      setBusy("Scanning folder…");
+      setImportProgress({
+        title: "Scanning folder",
+        message: `Scanning ${directoryHandle.name}…`,
+      });
       const generation = libraryLoadGeneration.current;
-      const entries = await collectDirectoryEntries(directoryHandle);
+      const entries = await collectDirectoryEntries(
+        directoryHandle,
+        (count, currentDir) => {
+          setImportProgress({
+            title: "Scanning folder",
+            message: `Found ${count.toLocaleString()} item${count === 1 ? "" : "s"} so far in ${currentDir || directoryHandle.name}…`,
+          });
+        },
+        () => generation !== libraryLoadGeneration.current,
+      );
+      if (generation !== libraryLoadGeneration.current) return;
       const loaded = await handleAddFolder(entries, { sourceId: source.id, generation });
       if (!loaded) await removeLibrarySource(source.id);
     } catch (e: any) {
-      if (e?.name !== "AbortError") {
+      if (e?.name !== "AbortError" && !e?.message?.includes("already active")) {
         toast.error(e?.message || "Folder open failed");
       }
       setBusy(null);
@@ -685,19 +729,23 @@ function TagMaestro() {
   }, [handleAddFolder]);
 
   const openFolderPicker = useCallback(async (fallbackInput: HTMLInputElement | null) => {
+    if (isPickingRef.current) return;
     const picker = (window as DirectoryPickerWindow).showDirectoryPicker;
     if (!picker) {
       fallbackInput?.click();
       return;
     }
 
+    isPickingRef.current = true;
     try {
       const directoryHandle = await picker.call(window, { mode: "readwrite" });
       await loadDirectoryHandle(directoryHandle);
-    } catch (error) {
-      if ((error as { name?: string })?.name !== "AbortError") {
-        toast.error((error as { message?: string })?.message || "Folder open failed");
+    } catch (error: any) {
+      if (error?.name !== "AbortError" && !error?.message?.includes("already active")) {
+        toast.error(error?.message || "Folder open failed");
       }
+    } finally {
+      isPickingRef.current = false;
     }
   }, [loadDirectoryHandle]);
 
@@ -760,9 +808,13 @@ function TagMaestro() {
             stillPending.push(source);
             continue;
           }
-          const entries = (await collectDirectoryEntries(source.handle)).filter(
-            (entry) => !excluded.has(entry.relativePath),
-          );
+          const entries = (
+            await collectDirectoryEntries(
+              source.handle,
+              undefined,
+              () => restoreGeneration !== libraryLoadGeneration.current,
+            )
+          ).filter((entry) => !excluded.has(entry.relativePath));
           restoredFiles += await handleAddFolder(entries, {
             sourceId: source.id,
             silent: true,
@@ -832,6 +884,27 @@ function TagMaestro() {
       prev.map((f) =>
         f.folderName === origFolder ? { ...f, editedFolderName: newName } : f,
       ),
+    );
+  }
+
+  /** Update filename for a single file. */
+  function updateFilename(id: string, newName: string) {
+    setFiles((prev) =>
+      prev.map((f) => {
+        if (f.id !== id) return f;
+        const origName = f.file.name;
+        const dot = origName.lastIndexOf(".");
+        const ext = dot > 0 ? origName.slice(dot) : "";
+        let base = newName;
+        if (ext && newName.toLowerCase().endsWith(ext.toLowerCase())) {
+          base = newName.slice(0, newName.length - ext.length);
+        }
+        return {
+          ...f,
+          renamedBase: base,
+          dirty: true,
+        };
+      }),
     );
   }
 
@@ -1388,8 +1461,6 @@ function TagMaestro() {
         files={selectedFiles.length ? selectedFiles : files}
         onApply={handleSplitText}
       />
-      <ImportProgressPanel progress={importProgress} />
-
       {/* Header */}
       <header className="relative z-30 shrink-0 border-b border-border bg-sidebar/60 backdrop-blur px-3 py-2 flex items-center gap-2">
         <div className="flex items-center gap-2">
@@ -1426,15 +1497,15 @@ function TagMaestro() {
           onChange={(e) => e.target.files && handleAddFolder(e.target.files)}
         />
         <div className="hidden items-center gap-2 lg:flex">
-          <Button size="sm" onClick={() => void openFilePicker()}>
+          <Button size="sm" onClick={() => void openFilePicker()} disabled={Boolean(busy || importProgress)}>
             <Upload className="mr-1.5 h-4 w-4" />
             Add files
           </Button>
-          <Button size="sm" variant="outline" onClick={() => void openFolderPicker(folderInput.current)}>
+          <Button size="sm" variant="outline" onClick={() => void openFolderPicker(folderInput.current)} disabled={Boolean(busy || importProgress)}>
             <FolderOpen className="mr-1.5 h-4 w-4" />
             Add Folder
           </Button>
-          <Button size="sm" variant="outline" onClick={() => void openFolderPicker(rootFolderInput.current)}>
+          <Button size="sm" variant="outline" onClick={() => void openFolderPicker(rootFolderInput.current)} disabled={Boolean(busy || importProgress)}>
             <FolderTree className="mr-1.5 h-4 w-4" />
             Add Root Folder
           </Button>
@@ -1559,17 +1630,35 @@ function TagMaestro() {
         {/* File table */}
         <main className="flex-1 min-w-0 flex flex-col overflow-hidden">
           {files.length === 0 ? (
-            <EmptyState
-              onFiles={() => void openFilePicker()}
-              onFolder={() => void openFolderPicker(folderInput.current)}
-              onRootFolder={() => void openFolderPicker(rootFolderInput.current)}
-            />
+            <>
+              <EmptyState
+                onFiles={() => void openFilePicker()}
+                onFolder={() => void openFolderPicker(folderInput.current)}
+                onRootFolder={() => void openFolderPicker(rootFolderInput.current)}
+                disabled={Boolean(busy || importProgress)}
+              />
+              <div className="relative border-t border-border px-4 py-2 flex items-center justify-between text-xs bg-sidebar/40 backdrop-blur select-none h-11 shrink-0">
+                <div className="min-w-0 flex flex-1 items-center gap-1 text-muted-foreground">
+                  <span>0 tracks</span>
+                </div>
+                <div className="flex min-w-0 flex-1 items-center justify-center gap-2">
+                  <ProgressOrStatus
+                    importProgress={importProgress}
+                    status={busy}
+                    onCancel={cancelImport}
+                  />
+                </div>
+                <div className="flex flex-1 justify-end" />
+              </div>
+            </>
           ) : (
             <FileTable
               files={filtered}
               selected={selected}
               filter={filter}
               status={busy && !importProgress ? busy : null}
+              importProgress={importProgress}
+              onCancelImport={cancelImport}
               onToggle={(id, additive) => {
                 setSelected((prev) => {
                   const next = new Set(additive ? prev : []);
@@ -1581,6 +1670,7 @@ function TagMaestro() {
               onSelectAll={setSelected}
               onEdit={updateTag}
               onEditFolder={updateFolderName}
+              onEditFilename={updateFilename}
               onRemoveSelected={removeSelected}
               onRemoveAll={removeAll}
             />
@@ -1655,91 +1745,83 @@ function TagMaestro() {
   );
 }
 
-function ImportProgressPanel({ progress }: { progress: ImportProgress | null }) {
-  const panelRef = useRef<HTMLDivElement>(null);
-  const dragRef = useRef<{ dx: number; dy: number; width: number; height: number } | null>(null);
-  const [position, setPosition] = useState<{ x: number; y: number } | null>(null);
-  const hasProgress = typeof progress?.loaded === "number" && typeof progress.total === "number";
-  const percent = hasProgress && progress.total ? Math.round((progress.loaded! / progress.total) * 100) : 0;
+function ProgressOrStatus({
+  importProgress,
+  status,
+  onCancel,
+}: {
+  importProgress?: ImportProgress | null;
+  status?: string | null;
+  onCancel?: () => void;
+}) {
+  if (importProgress) {
+    const hasNums = typeof importProgress.loaded === "number" && typeof importProgress.total === "number";
+    const pct = hasNums && importProgress.total ? Math.round((importProgress.loaded! / importProgress.total!) * 100) : 0;
+    return (
+      <span className="flex min-w-0 items-center gap-2 text-muted-foreground">
+        <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-primary" />
+        <span className="truncate text-xs font-medium">{importProgress.title}</span>
+        {hasNums && (
+          <>
+            <div className="h-1.5 w-24 overflow-hidden rounded-sm bg-muted shrink-0">
+              <div className="h-full bg-primary transition-[width]" style={{ width: `${pct}%` }} />
+            </div>
+            <span className="text-[11px] whitespace-nowrap">
+              {importProgress.loaded} / {importProgress.total}
+            </span>
+          </>
+        )}
+        {!hasNums && (
+          <span className="truncate text-[11px]">{importProgress.message}</span>
+        )}
+        {onCancel && (
+          <button
+            type="button"
+            className="ml-1 rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary shrink-0"
+            onClick={onCancel}
+            title="Cancel import"
+            aria-label="Cancel import"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        )}
+      </span>
+    );
+  }
 
-  if (!progress) return null;
+  if (status) {
+    return (
+      <span className="flex min-w-0 max-w-[260px] items-center gap-1.5 truncate text-muted-foreground" title={status}>
+        <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
+        <span className="truncate">{status}</span>
+        {onCancel && (
+          <button
+            type="button"
+            className="ml-1 rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary shrink-0"
+            onClick={onCancel}
+            title="Cancel"
+            aria-label="Cancel"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        )}
+      </span>
+    );
+  }
 
-  const startDrag = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (e.button !== 0) return;
-    const rect = panelRef.current?.getBoundingClientRect();
-    if (!rect) return;
-
-    dragRef.current = {
-      dx: e.clientX - rect.left,
-      dy: e.clientY - rect.top,
-      width: rect.width,
-      height: rect.height,
-    };
-    setPosition({ x: rect.left, y: rect.top });
-    e.currentTarget.setPointerCapture(e.pointerId);
-    e.preventDefault();
-  };
-
-  const moveDrag = (e: React.PointerEvent<HTMLDivElement>) => {
-    const drag = dragRef.current;
-    if (!drag) return;
-
-    const margin = 8;
-    const maxX = Math.max(margin, window.innerWidth - drag.width - margin);
-    const maxY = Math.max(margin, window.innerHeight - drag.height - margin);
-    const x = Math.min(Math.max(margin, e.clientX - drag.dx), maxX);
-    const y = Math.min(Math.max(margin, e.clientY - drag.dy), maxY);
-    setPosition({ x, y });
-  };
-
-  const stopDrag = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!dragRef.current) return;
-    dragRef.current = null;
-    e.currentTarget.releasePointerCapture(e.pointerId);
-  };
-
-  return (
-    <div
-      ref={panelRef}
-      className={`fixed z-50 w-[min(340px,calc(100vw-24px))] rounded-md border border-border bg-background p-3 text-foreground shadow-sm ${
-        position ? "" : "bottom-3 right-3"
-      }`}
-      style={position ? { left: position.x, top: position.y } : undefined}
-    >
-      <div
-        className="flex cursor-move touch-none select-none items-center gap-2 text-sm font-medium"
-        title="Drag to move"
-        onPointerDown={startDrag}
-        onPointerMove={moveDrag}
-        onPointerUp={stopDrag}
-        onPointerCancel={stopDrag}
-      >
-        <Loader2 className="h-4 w-4 animate-spin text-primary" />
-        {progress.title}
-      </div>
-      <p className="mt-2 text-xs text-muted-foreground">{progress.message}</p>
-      {hasProgress && (
-        <>
-          <div className="mt-2 h-1.5 overflow-hidden rounded-sm bg-muted">
-            <div className="h-full bg-primary" style={{ width: `${percent}%` }} />
-          </div>
-          <p className="mt-1.5 text-[11px] text-muted-foreground">
-            {progress.loaded} of {progress.total} files
-          </p>
-        </>
-      )}
-    </div>
-  );
+  return null;
 }
 
 function EmptyState({
   onFiles,
   onFolder,
   onRootFolder,
+  disabled,
 }: {
   onFiles: () => void;
   onFolder: () => void;
   onRootFolder: () => void;
+  disabled?: boolean;
 }) {
   return (
     <div className="flex-1 min-h-0 grid place-items-center overflow-auto p-4">
@@ -1753,15 +1835,15 @@ function EmptyState({
           Everything stays in your browser. No uploads, no accounts.
         </p>
         <div className="mt-4 grid grid-cols-3 gap-2">
-          <Button className="h-8 text-xs" onClick={onFiles}>
+          <Button className="h-8 text-xs" onClick={onFiles} disabled={disabled}>
             <Upload className="mr-1.5 h-4 w-4" />
             Files
           </Button>
-          <Button variant="outline" className="h-8 text-xs" onClick={onFolder}>
+          <Button variant="outline" className="h-8 text-xs" onClick={onFolder} disabled={disabled}>
             <FolderOpen className="mr-1.5 h-4 w-4" />
             Folder
           </Button>
-          <Button variant="outline" className="h-8 text-xs" onClick={onRootFolder}>
+          <Button variant="outline" className="h-8 text-xs" onClick={onRootFolder} disabled={disabled}>
             <FolderTree className="mr-1.5 h-4 w-4" />
             Root folder
           </Button>
@@ -1828,10 +1910,13 @@ function FileTable({
   selected,
   filter,
   status,
+  importProgress,
+  onCancelImport,
   onToggle,
   onSelectAll,
   onEdit,
   onEditFolder,
+  onEditFilename,
   onRemoveSelected,
   onRemoveAll,
 }: {
@@ -1839,10 +1924,13 @@ function FileTable({
   selected: Set<string>;
   filter: string;
   status?: string | null;
+  importProgress?: ImportProgress | null;
+  onCancelImport?: () => void;
   onToggle: (id: string, additive: boolean) => void;
   onSelectAll: (selected: Set<string>) => void;
   onEdit: (id: string, key: TagKey, value: string) => void;
   onEditFolder: (id: string, value: string) => void;
+  onEditFilename: (id: string, value: string) => void;
   onRemoveSelected: () => void;
   onRemoveAll: () => void;
 }) {
@@ -2047,12 +2135,65 @@ function FileTable({
 
   // Gmail-style banner action: clear entire selection
   function handleClearSelection() {
+    lastClickedIdRef.current = null;
     onSelectAll(new Set());
+  }
+
+  const lastClickedIdRef = useRef<string | null>(null);
+
+  // Range and multi-selection handler for row clicks and checkbox clicks
+  function handleRowSelection(
+    id: string,
+    options: { isCheckbox: boolean; shiftKey: boolean; ctrlKey: boolean },
+  ) {
+    const { isCheckbox, shiftKey, ctrlKey } = options;
+
+    if (shiftKey && lastClickedIdRef.current) {
+      const anchorId = lastClickedIdRef.current;
+      const fromIdx = pageFiles.findIndex((f) => f.id === anchorId);
+      const toIdx = pageFiles.findIndex((f) => f.id === id);
+
+      if (fromIdx !== -1 && toIdx !== -1) {
+        const start = Math.min(fromIdx, toIdx);
+        const end = Math.max(fromIdx, toIdx);
+        const next = new Set(selected);
+        for (let i = start; i <= end; i++) {
+          next.add(pageFiles[i].id);
+        }
+        onSelectAll(next);
+        return;
+      }
+    }
+
+    lastClickedIdRef.current = id;
+
+    if (isCheckbox) {
+      const next = new Set(selected);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      onSelectAll(next);
+    } else {
+      if (ctrlKey) {
+        const next = new Set(selected);
+        if (next.has(id)) {
+          next.delete(id);
+        } else {
+          next.add(id);
+        }
+        onSelectAll(next);
+      } else {
+        onSelectAll(new Set([id]));
+      }
+    }
   }
 
   function openRowMenu(e: React.MouseEvent<HTMLTableRowElement>, file: Mp3File) {
     e.preventDefault();
     e.stopPropagation();
+    lastClickedIdRef.current = file.id;
     if (!selected.has(file.id)) {
       onSelectAll(new Set([file.id]));
     }
@@ -2273,17 +2414,30 @@ function FileTable({
                   key={f.id}
                   data-selected={isSel}
                   className="h-6 border-b border-slate-200 bg-white hover:bg-slate-50 data-[selected=true]:bg-blue-50 data-[selected=true]:hover:bg-blue-100 dark:border-border/60 dark:bg-transparent dark:hover:bg-accent/40 dark:data-[selected=true]:bg-primary/10 dark:data-[selected=true]:hover:bg-primary/15"
-                  onClick={(e) => onToggle(f.id, e.metaKey || e.ctrlKey || e.shiftKey)}
+                  onClick={(e) =>
+                    handleRowSelection(f.id, {
+                      isCheckbox: false,
+                      shiftKey: e.shiftKey,
+                      ctrlKey: e.metaKey || e.ctrlKey,
+                    })
+                  }
                   onContextMenu={(e) => openRowMenu(e, f)}
                 >
                   <td style={{ width: 36, minWidth: 36, maxWidth: 36 }} className="align-middle px-2 py-0.5">
                     <input
                       type="checkbox"
                       checked={isSel}
-                      onChange={() => onToggle(f.id, true)}
-                      onClick={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleRowSelection(f.id, {
+                          isCheckbox: true,
+                          shiftKey: e.shiftKey,
+                          ctrlKey: e.metaKey || e.ctrlKey,
+                        });
+                      }}
+                      onChange={() => {}}
                       aria-label="Select"
-                      className="h-3 w-3 align-middle accent-primary"
+                      className="h-3 w-3 align-middle accent-primary cursor-pointer"
                     />
                   </td>
                   {visible.map((col) => (
@@ -2293,6 +2447,7 @@ function FileTable({
                       col={col}
                       onEdit={onEdit}
                       onEditFolder={onEditFolder}
+                      onEditFilename={onEditFilename}
                     />
                   ))}
                   <td style={{ width: 32, minWidth: 32, maxWidth: 32 }} className="px-1 py-0.5" />
@@ -2393,7 +2548,7 @@ function FileTable({
 
       {/* Pagination Footer */}
       <div className="relative border-t border-border px-4 py-2 flex items-center justify-between text-xs bg-sidebar/40 backdrop-blur select-none h-11 shrink-0">
-        <div className="min-w-0 flex flex-1 items-center gap-1 text-muted-foreground">
+        <div className="min-w-0 flex flex-1 items-center gap-1.5 text-muted-foreground">
           <span>Showing</span>
           <span className="font-semibold text-foreground">
             {files.length === 0 ? 0 : (activePage - 1) * pageSize + 1}
@@ -2405,15 +2560,31 @@ function FileTable({
           <span>of</span>
           <span className="font-semibold text-foreground">{files.length}</span>
           <span>tracks</span>
+          {selected.size > 0 && (
+            <>
+              <span className="mx-1 text-border">·</span>
+              <span>
+                <strong className="text-foreground">{selected.size}</strong> selected
+              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 px-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-accent/60"
+                onClick={handleClearSelection}
+                title="Clear selection"
+              >
+                Clear selection
+              </Button>
+            </>
+          )}
         </div>
 
         <div className="flex min-w-0 flex-1 items-center justify-center gap-2">
-          {status && (
-            <span className="flex min-w-0 max-w-[260px] items-center gap-1.5 truncate text-muted-foreground" title={status}>
-              <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
-              <span className="truncate">{status}</span>
-            </span>
-          )}
+          <ProgressOrStatus
+            importProgress={importProgress}
+            status={status}
+            onCancel={onCancelImport}
+          />
           {totalPages > 1 && (
             <div className="flex items-center gap-1.5">
             <Button
@@ -2467,11 +2638,6 @@ function FileTable({
         </div>
 
         <div className="flex flex-1 items-center justify-end gap-2">
-          {selected.size > 0 && (
-            <span className="text-muted-foreground">
-              {selected.size} selected
-            </span>
-          )}
           <span className="text-muted-foreground">Show:</span>
           <select
             value={pageSize}
@@ -2742,11 +2908,13 @@ function TableCell({
   col,
   onEdit,
   onEditFolder,
+  onEditFilename,
 }: {
   file: Mp3File;
   col: TableColumn;
   onEdit: (id: string, key: TagKey, value: string) => void;
   onEditFolder: (id: string, value: string) => void;
+  onEditFilename: (id: string, value: string) => void;
 }) {
   const colStyle = {
     width: `var(--col-width-${col.key})`,
@@ -2760,6 +2928,17 @@ function TableCell({
         value={file.editedFolderName}
         onChange={(v) => onEditFolder(file.id, v)}
         style={colStyle}
+      />
+    );
+  }
+
+  if (col.kind === "filename") {
+    return (
+      <TdCell
+        value={directSaveFilename(file)}
+        onChange={(v) => onEditFilename(file.id, v)}
+        style={colStyle}
+        dirty={file.dirty}
       />
     );
   }
@@ -2789,11 +2968,9 @@ function TableCell({
   }
 
   const readOnly =
-    col.kind === "filename"
-      ? file.file.name
-      : col.kind === "path"
-        ? file.meta.path
-        : file.meta[col.key as MetaKey];
+    col.kind === "path"
+      ? file.meta.path
+      : file.meta[col.key as MetaKey];
 
   return (
     <td
@@ -2801,9 +2978,6 @@ function TableCell({
       className="truncate px-2 py-0.5 text-slate-700 dark:text-muted-foreground"
       title={readOnly}
     >
-      {col.kind === "filename" && file.dirty && (
-        <span className="text-primary mr-1">●</span>
-      )}
       {readOnly}
     </td>
   );
@@ -2813,19 +2987,24 @@ function TdCell({
   value,
   onChange,
   style,
+  dirty,
 }: {
   value: string;
   onChange: (v: string) => void;
   style: React.CSSProperties;
+  dirty?: boolean;
 }) {
   return (
     <td style={style} className="px-1 py-px">
-      <input
-        className="h-5 w-full truncate rounded-none bg-transparent px-1.5 py-0 text-[11px] leading-none text-slate-950 outline-none focus:bg-white focus:ring-1 focus:ring-primary dark:text-foreground dark:focus:bg-background"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        onClick={(e) => e.stopPropagation()}
-      />
+      <div className="flex items-center">
+        {dirty && <span className="text-primary ml-0.5 mr-1 shrink-0 text-[10px]" title="Modified">●</span>}
+        <input
+          className="h-5 w-full truncate rounded-none bg-transparent px-1.5 py-0 text-[11px] leading-none text-slate-950 outline-none focus:bg-white focus:ring-1 focus:ring-primary dark:text-foreground dark:focus:bg-background"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onClick={(e) => e.stopPropagation()}
+        />
+      </div>
     </td>
   );
 }
