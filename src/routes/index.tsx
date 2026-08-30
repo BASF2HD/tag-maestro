@@ -2993,7 +2993,9 @@ function EditorPanel({
                   variant="secondary"
                   className="h-6 flex-1 px-2 text-[11px]"
                   onClick={() => coverInput.current?.click()}
+                  title="Upload cover art"
                 >
+                  <Upload className="mr-1 h-3 w-3" />
                   Upload
                 </Button>
                 {tags.cover && (
