@@ -48,6 +48,7 @@ import {
   type FileMeta,
 } from "@/lib/mp3";
 import { FolderRenameDialog } from "@/components/FolderRenameDialog";
+import { CoverCleanupDialog } from "@/components/CoverCleanupDialog";
 import { BulkFieldEditDialog, type BulkFieldKey } from "@/components/BulkFieldEditDialog";
 import { ExtractTextDialog, type ExtractTargetKey } from "@/components/ExtractTextDialog";
 import {
@@ -313,6 +314,7 @@ function TagMaestro() {
   const [pattern] = useState("%artist% - %title%");
   const [filter, setFilter] = useState("");
   const [folderRenameOpen, setFolderRenameOpen] = useState(false);
+  const [coverCleanupOpen, setCoverCleanupOpen] = useState(false);
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
   const [converterOpen, setConverterOpen] = useState(false);
   const [extractTextOpen, setExtractTextOpen] = useState(false);
@@ -834,11 +836,11 @@ function TagMaestro() {
             stillPending.push(source);
             continue;
           }
-          restoredFiles += await handleAdd(entries, {
+          restoredFiles += (await handleAdd(entries, {
             sourceId: source.id,
             silent: true,
             generation: restoreGeneration,
-          });
+          })) || 0;
         }
       } catch {
         stillPending.push(source);
@@ -1351,6 +1353,15 @@ function TagMaestro() {
         onApply={handleSplitText}
       />
       {/* Header */}
+      <CoverCleanupDialog
+        open={coverCleanupOpen}
+        onOpenChange={setCoverCleanupOpen}
+        files={files}
+        onTrackSaved={(row, saved, cover) => setFiles(previous => previous.map(item => item.id === row.id ? {
+          ...item, file: saved, tags: { ...item.tags, cover }, original: { ...item.original, cover },
+          meta: { ...item.meta, size: `${(saved.size / (1024 * 1024)).toFixed(2)} MB`, modified: new Date(saved.lastModified).toLocaleString() },
+        } : item))}
+      />
       <header className="relative z-30 shrink-0 border-b border-border bg-sidebar/60 backdrop-blur px-3 py-2 flex items-center gap-2">
         <div className="flex items-center gap-2">
           <div className="h-8 w-8 rounded-md bg-primary text-primary-foreground grid place-items-center shadow-[0_0_0_1px_var(--border)]">
@@ -1441,11 +1452,23 @@ function TagMaestro() {
           <Save className="mr-1.5 h-4 w-4" />
           Save all
         </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={!files.length || Boolean(busy || importProgress)}
+          onClick={() => setCoverCleanupOpen(true)}
+          title="Codex-assisted cover cleanup"
+          aria-label="Codex-assisted cover cleanup"
+        >
+          <ImageIcon className="h-4 w-4" />
+          <span className="ml-1.5 hidden xl:inline">Cover cleanup</span>
+        </Button>
         <ToolbarMenu
           label="Tools"
           icon={Wand2}
           disabled={!files.length}
           items={[
+            { label: "Codex-assisted cover cleanup", onSelect: () => setCoverCleanupOpen(true) },
             { label: "Rename folders", onSelect: () => setFolderRenameOpen(true) },
             { label: "Bulk edit", onSelect: () => setBulkEditOpen(true) },
             { label: "Convert tags", onSelect: () => setConverterOpen(true) },

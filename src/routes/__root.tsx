@@ -82,18 +82,17 @@ export const Route = createRootRouteWithContext()({
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "TagMaestro — AI MP3 Tag Editor" },
+      { title: "TagMaestro — Music Tags & Cover Art" },
       {
         name: "description",
         content:
-          "Edit ID3 tags on your MP3 files in the browser. Batch rename, auto-fill from filenames, identify songs, clean up messy tags, and generate album covers with AI.",
+          "Edit music tags, rename folders and review Codex-assisted album-cover cleanup for MP3, M4A, FLAC and WAV files locally.",
       },
       { name: "author", content: "TagMaestro" },
-      { property: "og:title", content: "TagMaestro — AI MP3 Tag Editor" },
+      { property: "og:title", content: "TagMaestro — Music Tags & Cover Art" },
       {
         property: "og:description",
-        content:
-          "Browser-based MP3 tag editor with AI: auto-fill, identify, clean up, and generate cover art.",
+        content: "Local music-tag editing and reviewed, Codex-assisted cover-art cleanup.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
@@ -128,7 +127,5 @@ function RootShell({ children }: { children: ReactNode }) {
 }
 
 function RootComponent() {
-  return (
-    <Outlet />
-  );
+  return <Outlet />;
 }

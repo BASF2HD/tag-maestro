@@ -2,6 +2,7 @@
 // Reads tags with jsmediatags and writes format-native tags with TagLib-Wasm.
 import jsmediatags from "jsmediatags/dist/jsmediatags.min.js";
 import type { AudioFile, PropertyMap, TagLib } from "taglib-wasm";
+import { replaceWavArtwork, wavPreservedBytes } from "./wav-artwork";
 
 export type AudioFormat = "mp3" | "m4a" | "flac" | "wav" | "other";
 
@@ -273,7 +274,35 @@ export async function writeTagsToBlob(m: Mp3File): Promise<Blob> {
     m.format === "wav" && !coversEqual(m.tags.cover, m.original.cover)
       ? updateWavCover(output, m.tags.cover)
       : output;
-  return new Blob([tagged], { type: m.file.type || mimeForFormat(m.format) });
+  return new Blob([new Uint8Array(tagged)], { type: m.file.type || mimeForFormat(m.format) });
+}
+
+/** Cover cleanup never applies pending text edits, renames or audio encoding. */
+export async function writeCoverToBlob(
+  file: File,
+  cover: NonNullable<Mp3Tags["cover"]>,
+): Promise<Blob> {
+  const input = new Uint8Array(await file.arrayBuffer());
+  const format = detectFormat(file);
+  let output: Uint8Array;
+  if (format === "wav") {
+    output = replaceWavArtwork(input, cover.data, cover.mime);
+    const before = wavPreservedBytes(input);
+    const after = wavPreservedBytes(output);
+    if (before.length !== after.length || before.some((byte, index) => byte !== after[index]))
+      throw new Error("Audio/metadata preservation check failed; original was not changed");
+  } else {
+    if (format === "other") throw new Error("Unsupported audio format");
+    const taglib = await getTagLib();
+    output = await taglib.edit({ name: file.name, data: input }, (audio) => {
+      const other = audio.getPictures().filter((picture) => picture.type !== "FrontCover");
+      audio.setPictures([
+        { type: "FrontCover", mimeType: cover.mime, data: cover.data, description: "Cover" },
+        ...other,
+      ]);
+    });
+  }
+  return new Blob([new Uint8Array(output)], { type: file.type || mimeForFormat(format) });
 }
 
 async function readTagsWithJsMedia(file: File, readEmbeddedCover: boolean): Promise<Mp3Tags> {
@@ -317,10 +346,7 @@ async function readTagsWithJsMedia(file: File, readEmbeddedCover: boolean): Prom
   }
 }
 
-async function readTextTagsWithTagLib(
-  file: File,
-  readEmbeddedCover: boolean,
-): Promise<Mp3Tags> {
+async function readTextTagsWithTagLib(file: File, readEmbeddedCover: boolean): Promise<Mp3Tags> {
   const bytes = new Uint8Array(await file.arrayBuffer());
   const taglib = await getTagLib();
   const audioFile = await taglib.open({ name: file.name, data: bytes });
@@ -339,10 +365,7 @@ async function readTextTagsWithTagLib(
         firstValue(properties.discNumber),
         firstValue(properties.totalDiscs),
       ),
-      track: joinNumberPair(
-        firstValue(properties.trackNumber),
-        firstValue(properties.totalTracks),
-      ),
+      track: joinNumberPair(firstValue(properties.trackNumber), firstValue(properties.totalTracks)),
       comment: firstValue(properties.comment),
       bpm: firstValue(properties.bpm),
     };
@@ -552,6 +575,7 @@ function readId3Cover(tag: Uint8Array): Mp3Tags["cover"] {
   const version = tag[3] === 4 ? 4 : 3;
   const tagEnd = Math.min(tag.byteLength, 10 + readSyncSafe(tag, 6));
   let offset = id3FrameStart(tag, tagEnd, version);
+  let fallback: Mp3Tags["cover"];
 
   while (offset + 10 <= tagEnd) {
     const id = ascii(tag, offset, offset + 4);
@@ -560,10 +584,16 @@ function readId3Cover(tag: Uint8Array): Mp3Tags["cover"] {
     const bodyStart = offset + 10;
     const bodyEnd = bodyStart + size;
     if (bodyEnd > tagEnd) break;
-    if (id === "APIC") return parseApicBody(tag.subarray(bodyStart, bodyEnd));
+    if (id === "APIC") {
+      const body = tag.subarray(bodyStart, bodyEnd);
+      const parsed = parseApicBody(body);
+      fallback ||= parsed;
+      const mimeEnd = body.indexOf(0, 1);
+      if (mimeEnd >= 0 && body[mimeEnd + 1] === 3 && parsed) return parsed;
+    }
     offset = bodyEnd;
   }
-  return undefined;
+  return fallback;
 }
 
 function parseApicBody(body: Uint8Array): Mp3Tags["cover"] {

@@ -31,3 +31,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Private music fixtures and review images
+.design-qa/
+# Local-only helpers referencing private fixture paths
+scripts/verify-cover-cleanup.mjs
+scripts/cover-workflow-demo.*

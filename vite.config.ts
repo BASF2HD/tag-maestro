@@ -5,7 +5,7 @@ import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
-export default defineConfig(({ command }) => ({
+export default defineConfig({
   plugins: [tanstackStart(), react(), tailwindcss()],
   resolve: {
     tsconfigPaths: true,
@@ -19,5 +19,4 @@ export default defineConfig(({ command }) => ({
     port: 5173,
     strictPort: false,
   },
-  builder: command === "build" ? { target: "cloudflare" } : undefined,
-}));
+});
