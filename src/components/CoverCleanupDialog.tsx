@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -6,7 +6,6 @@ import { Image as ImageIcon, Download, Upload, Save, Loader2 } from "@/component
 import { type Mp3File, type Mp3Tags } from "@/lib/mp3";
 import {
   DEFAULT_WATERMARKS,
-  MAX_BATCH,
   groupCoverJobs,
   sourceCover,
   exportCoverBatch,
@@ -15,10 +14,12 @@ import {
   readReview,
   reviewSummaries,
   storeReview,
+  setReviewApprovals,
   saveReviewedAlbum,
   type ReviewEdit,
   type ReviewSummary,
 } from "@/lib/cover-cleanup";
+import { BATCH_SIZES, savedCoverBatchSize } from "@/lib/cover-batch-settings";
 
 function useBlobUrl(blob?: Blob) {
   const [url, setUrl] = useState<string>();
@@ -28,8 +29,19 @@ function useBlobUrl(blob?: Blob) {
       return;
     }
     const url = URL.createObjectURL(blob);
-    setUrl(url);
-    return () => URL.revokeObjectURL(url);
+    let cancelled = false;
+    const image = new Image();
+    image.onload = () => {
+      if (!cancelled) setUrl(url);
+    };
+    image.onerror = () => {
+      if (!cancelled) setUrl(undefined);
+    };
+    image.src = url;
+    return () => {
+      cancelled = true;
+      URL.revokeObjectURL(url);
+    };
   }, [blob]);
   return url;
 }
@@ -45,10 +57,19 @@ type Props = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   files: Mp3File[];
-  onTrackSaved: (row: Mp3File, file: File, cover: NonNullable<Mp3Tags["cover"]>) => void;
+  onTrackSaved?: (row: Mp3File, file: File, cover: NonNullable<Mp3Tags["cover"]>) => void;
+  onTracksSaved?: (tracks: SavedArtworkTrack[]) => void;
 };
-export function CoverCleanupDialog({ open, onOpenChange, files, onTrackSaved }: Props) {
+export type SavedArtworkTrack = { row: Mp3File; file: File; cover: NonNullable<Mp3Tags["cover"]> };
+export function CoverCleanupDialog({
+  open,
+  onOpenChange,
+  files,
+  onTrackSaved,
+  onTracksSaved,
+}: Props) {
   const jobs = useMemo(() => groupCoverJobs(files), [files]);
+  const jobsById = useMemo(() => new Map(jobs.map((source) => [source.id, source])), [jobs]);
   const [selected, setSelected] = useState(new Set<string>());
   const [active, setActive] = useState("");
   const [summaries, setSummaries] = useState<Record<string, ReviewSummary>>({});
@@ -62,32 +83,70 @@ export function CoverCleanupDialog({ open, onOpenChange, files, onTrackSaved }: 
   const [filter, setFilter] = useState("");
   const [page, setPage] = useState(0);
   const [revision, setRevision] = useState(0);
+  const [batchSize, setBatchSize] = useState(savedCoverBatchSize);
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("coverCleanupBatchSize", String(batchSize));
+    } catch {
+      /* Storage is optional. */
+    }
+  }, [batchSize]);
   const batchInput = useRef<HTMLInputElement>(null);
   const imageInput = useRef<HTMLInputElement>(null);
+  const approvalInput = useRef<HTMLInputElement>(null);
   const wasOpen = useRef(false);
-  const job = jobs.find((item) => item.id === active);
-  const filtered = jobs.filter((item) =>
-    `${item.album} ${item.path}`.toLowerCase().includes(filter.toLowerCase()),
+  const job = jobsById.get(active);
+  const currentJob = useRef(job);
+  currentJob.current = job;
+  const displayedAlbum = useRef("");
+  const previewFingerprint = job?.fingerprint;
+  const filtered = useMemo(
+    () =>
+      jobs.filter((item) =>
+        `${item.album} ${item.path}`.toLowerCase().includes(filter.toLowerCase()),
+      ),
+    [jobs, filter],
   );
-  const shown = filtered.slice(page * MAX_BATCH, (page + 1) * MAX_BATCH);
+  const shown = filtered.slice(page * batchSize, (page + 1) * batchSize);
   const beforeUrl = useBlobUrl(original);
   const afterUrl = useBlobUrl(edit?.image);
-  const eligible = (id: string) => {
-    const summary = summaries[id],
-      source = jobs.find((item) => item.id === id);
-    return (
-      summary &&
-      source &&
-      summary.fingerprint === source.fingerprint &&
-      summary.approved &&
-      !summary.saved
-    );
-  };
-  const approved = [...selected].filter(eligible);
+  const eligible = useCallback(
+    (id: string) => {
+      const summary = summaries[id],
+        source = jobsById.get(id);
+      return (
+        summary &&
+        source &&
+        summary.fingerprint === source.fingerprint &&
+        summary.approved &&
+        !summary.saved
+      );
+    },
+    [summaries, jobsById],
+  );
+  const approved = useMemo(() => [...selected].filter(eligible), [selected, eligible]);
+  const reviewable = useMemo(
+    () =>
+      jobs.filter((source) => {
+        const summary = summaries[source.id];
+        return summary && summary.fingerprint === source.fingerprint && !summary.saved;
+      }),
+    [jobs, summaries],
+  );
+  const approvalCount = reviewable.filter((source) => summaries[source.id].approved).length;
+  const savedCount = jobs.filter(
+    (source) =>
+      summaries[source.id]?.saved && summaries[source.id].fingerprint === source.fingerprint,
+  ).length;
+  const allApproved = reviewable.length > 0 && approvalCount === reviewable.length;
+  const partiallyApproved = approvalCount > 0 && !allApproved;
+  useEffect(() => {
+    if (approvalInput.current) approvalInput.current.indeterminate = partiallyApproved;
+  }, [partiallyApproved, open]);
 
   useEffect(() => {
     if (open && !wasOpen.current) {
-      setSelected(new Set(jobs.slice(0, MAX_BATCH).map((item) => item.id)));
+      setSelected(new Set(jobs.slice(0, batchSize).map((item) => item.id)));
       setActive(jobs[0]?.id || "");
       setPage(0);
       setFilter("");
@@ -99,22 +158,30 @@ export function CoverCleanupDialog({ open, onOpenChange, files, onTrackSaved }: 
         .catch((error) => setError(String(error)));
     }
     wasOpen.current = open;
-  }, [open, jobs]);
+  }, [open, jobs, batchSize]);
   useEffect(() => {
-    if (!open || !job) return;
+    const source = currentJob.current;
+    if (!open || !source || busy) return;
     let cancelled = false;
-    setEdit(undefined);
-    setOriginal(undefined);
+    // Updating another track/album must never blank the current cover previews.
+    if (displayedAlbum.current !== source.id) {
+      displayedAlbum.current = source.id;
+      setEdit(undefined);
+      setOriginal(undefined);
+    }
     void (async () => {
-      const saved = await readReview(job.id);
-      if (saved && saved.fingerprint === job.fingerprint) {
+      const saved = await readReview(source.id);
+      if (saved && saved.fingerprint === source.fingerprint) {
         if (!cancelled) {
           setEdit(saved);
           setOriginal(saved.sourceImage);
         }
       } else {
-        const cover = await sourceCover(job);
-        if (!cancelled) setOriginal(new Blob([new Uint8Array(cover.data)], { type: cover.mime }));
+        const cover = await sourceCover(source);
+        if (!cancelled) {
+          setEdit(undefined);
+          setOriginal(new Blob([new Uint8Array(cover.data)], { type: cover.mime }));
+        }
       }
     })().catch((error) => {
       if (!cancelled) setError(String(error instanceof Error ? error.message : error));
@@ -122,7 +189,7 @@ export function CoverCleanupDialog({ open, onOpenChange, files, onTrackSaved }: 
     return () => {
       cancelled = true;
     };
-  }, [open, job, revision]);
+  }, [open, active, previewFingerprint, revision, busy]);
   if (!open) return null;
 
   async function run(action: () => Promise<void>) {
@@ -144,16 +211,17 @@ export function CoverCleanupDialog({ open, onOpenChange, files, onTrackSaved }: 
   }
   async function saveAlbums(ids: string[]) {
     let count = 0;
+    const completed: SavedArtworkTrack[] = [];
     try {
       for (const id of ids) {
-        const source = jobs.find((item) => item.id === id);
+        const source = jobsById.get(id);
         const record = await readReview(id);
         if (!source || !record) throw new Error("Reviewed cover missing");
         await saveReviewedAlbum(
           source,
           record,
           (row, saved, cover) => {
-            onTrackSaved(row, saved, cover);
+            completed.push({ row, file: saved, cover });
             count++;
           },
           setMessage,
@@ -163,6 +231,11 @@ export function CoverCleanupDialog({ open, onOpenChange, files, onTrackSaved }: 
         `Saved and read-back verified artwork in ${count} original ${count === 1 ? "song" : "songs"}. No audio encoding performed.`,
       );
     } finally {
+      // One library update, including verified partial saves if a later write fails.
+      if (completed.length) {
+        if (onTracksSaved) onTracksSaved(completed);
+        else completed.forEach(({ row, file, cover }) => onTrackSaved?.(row, file, cover));
+      }
       await refresh();
     }
   }
@@ -198,7 +271,7 @@ export function CoverCleanupDialog({ open, onOpenChange, files, onTrackSaved }: 
           <Button
             size="sm"
             variant="outline"
-            disabled={busy || !selected.size || selected.size > MAX_BATCH}
+            disabled={busy || !selected.size || selected.size > batchSize}
             onClick={() =>
               void run(async () => {
                 const batch = jobs.filter((item) => selected.has(item.id));
@@ -291,6 +364,70 @@ export function CoverCleanupDialog({ open, onOpenChange, files, onTrackSaved }: 
             }}
           />
         </div>
+        <div className="mt-3 rounded-[4px] border border-border px-3 py-2">
+          <label className="flex items-center gap-2 text-xs">
+            <input
+              ref={approvalInput}
+              type="checkbox"
+              aria-label="Approve all imported artwork"
+              aria-checked={partiallyApproved ? "mixed" : allApproved}
+              checked={allApproved}
+              disabled={busy || !reviewable.length}
+              onChange={(event) => {
+                const approve = event.target.checked;
+                void run(async () => {
+                  const updated = await setReviewApprovals(reviewable, approve);
+                  if (approve)
+                    setSelected(
+                      (previous) =>
+                        new Set([...previous, ...reviewable.map((source) => source.id)]),
+                    );
+                  await refresh();
+                  setMessage(
+                    `${approve ? "Approved" : "Removed approval from"} ${updated} imported ${updated === 1 ? "album" : "albums"}. Originals are unchanged until you press Save.`,
+                  );
+                });
+              }}
+            />
+            <span>
+              Approve all imported artwork ({approvalCount}/{reviewable.length} albums)
+            </span>
+          </label>
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            Includes imported edits on every page, not just this filter. Check covers before
+            approving. Missing, changed and already-saved artwork is excluded. Individual approval
+            still works below.
+          </p>
+          {!reviewable.length && savedCount > 0 && (
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              {savedCount} albums are already saved. Re-import the edited ZIP to review and approve
+              them again. Successful re-import clears their saved status; it does not write music
+              files.
+            </p>
+          )}
+        </div>
+        <label className="mt-3 flex items-center gap-2 text-xs">
+          Albums per batch
+          <select
+            aria-label="Albums per batch"
+            className="h-7 rounded-[4px] border border-input bg-background px-2 text-xs"
+            value={batchSize}
+            disabled={busy}
+            onChange={(event) => {
+              setBatchSize(Number(event.target.value));
+              setPage(0);
+            }}
+          >
+            {BATCH_SIZES.map((size) => (
+              <option key={size} value={size}>
+                {size} albums
+              </option>
+            ))}
+          </select>
+          <span className="text-muted-foreground">
+            Export limit and albums per page. Choose Select this page to include more.
+          </span>
+        </label>
         <label className="mt-3 flex items-center gap-2 text-xs">
           Watermarks to remove only when clearly identified
           <Input
@@ -301,9 +438,16 @@ export function CoverCleanupDialog({ open, onOpenChange, files, onTrackSaved }: 
             onChange={(event) => setWatermarks(event.target.value)}
           />
         </label>
-        <div className="mt-3 min-h-5 text-xs" role="status">
-          {busy && <Loader2 className="mr-1 inline h-3 w-3 animate-spin" />}
-          {message}
+        <div
+          className="mt-3 flex h-10 shrink-0 items-start gap-1 overflow-hidden text-xs"
+          role="status"
+        >
+          <span className="inline-block w-4 shrink-0">
+            {busy && <Loader2 className="h-3 w-3 animate-spin" />}
+          </span>
+          <span className="line-clamp-2 min-w-0" title={message}>
+            {message}
+          </span>
         </div>
         {error && (
           <p className="whitespace-pre-wrap text-xs text-destructive" role="alert">
@@ -391,20 +535,20 @@ export function CoverCleanupDialog({ open, onOpenChange, files, onTrackSaved }: 
                 Previous
               </Button>
               <span>
-                {page + 1} / {Math.max(1, Math.ceil(filtered.length / MAX_BATCH))}
+                {page + 1} / {Math.max(1, Math.ceil(filtered.length / batchSize))}
               </span>
               <Button
                 size="sm"
                 variant="ghost"
-                disabled={busy || (page + 1) * MAX_BATCH >= filtered.length}
+                disabled={busy || (page + 1) * batchSize >= filtered.length}
                 onClick={() => setPage((value) => value + 1)}
               >
                 Next
               </Button>
             </div>
             <p className="mt-2 text-[11px] text-muted-foreground">
-              Up to 25 albums per export. Edits and review status are retained locally in this
-              browser. Nothing writes automatically.
+              Up to {batchSize} albums per export (512 MB maximum). Edits and review status are
+              retained locally in this browser. Nothing writes automatically.
             </p>
           </section>
           <section className="min-w-0 rounded-[4px] border border-border p-3">
@@ -490,9 +634,9 @@ export function CoverCleanupDialog({ open, onOpenChange, files, onTrackSaved }: 
             </p>
           </section>
         </div>
-        {selected.size > MAX_BATCH && (
+        {selected.size > batchSize && (
           <p className="text-xs text-destructive">
-            Choose at most {MAX_BATCH} albums before exporting.
+            Increase Albums per batch or choose at most {batchSize} albums before exporting.
           </p>
         )}
       </DialogContent>

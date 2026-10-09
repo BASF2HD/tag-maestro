@@ -1,4 +1,6 @@
 import JSZip from "jszip";
+import { MAX_BATCH, MAX_ARCHIVE_BYTES } from "./cover-batch-settings";
+export { MAX_BATCH } from "./cover-batch-settings";
 import { writeVerifiedFile } from "./verified-file-write";
 import { readMp3, writeCoverToBlob, type Mp3File, type Mp3Tags } from "./mp3";
 
@@ -11,9 +13,14 @@ export type CoverJob = {
   fingerprint: string;
 };
 export type ReviewSummary = { id: string; fingerprint: string; approved: boolean; saved: boolean };
-export type ReviewEdit = ReviewSummary & { image: Blob; sourceImage: Blob };
+export type ReviewEdit = ReviewSummary & {
+  image: Blob;
+  sourceImage: Blob;
+  /** Original batch provenance survives verified writes and repeated imports. */
+  exportFingerprint?: string;
+  exportArtworkSha256?: string;
+};
 export const DEFAULT_WATERMARKS = "samperals, samperials, desinapster, desihires.com";
-export const MAX_BATCH = 25;
 
 function stableId(value: string) {
   let a = 2166136261,
@@ -91,6 +98,7 @@ export async function exportCoverBatch(
   if (!jobs.length || jobs.length > MAX_BATCH)
     throw new Error(`Export between 1 and ${MAX_BATCH} albums at a time`);
   const zip = new JSZip();
+  let artworkBytes = 0;
   const manifest: {
     id: string;
     album: string;
@@ -106,6 +114,9 @@ export async function exportCoverBatch(
     const cover = await sourceCover(job);
     const original = `originals/${job.id}.${cover.mime === "image/png" ? "png" : "jpg"}`;
     const blob = new Blob([new Uint8Array(cover.data)], { type: cover.mime });
+    artworkBytes += blob.size;
+    if (artworkBytes > MAX_ARCHIVE_BYTES)
+      throw new Error("Artwork exceeds the 512 MB batch limit. Select fewer albums.");
     zip.file(original, blob);
     zip.file(
       `prompts/${job.id}.txt`,
@@ -140,7 +151,10 @@ export async function exportCoverBatch(
     "Please use the imagegen skill and built-in image editor to edit each original using its matching prompts/*.txt. Keep manifest.json and originals unchanged. Put edited images under edited/ with the exact job IDs. Inspect each image, preserve authentic titles/logos/faces, and flag uncertain edits. Return a ZIP containing manifest.json, originals/ and edited/. Do not change audio files. No API calls and no LaMa.\n",
   );
   progress("Creating export ZIP…");
-  return zip.generateAsync({ type: "blob", compression: "STORE" });
+  const archive = await zip.generateAsync({ type: "blob", compression: "STORE" });
+  if (archive.size > MAX_ARCHIVE_BYTES)
+    throw new Error("Export ZIP exceeds 512 MB. Select fewer albums.");
+  return archive;
 }
 /** Deterministic output normalization only; restoration is done by Codex. */
 export async function normalizeCover(blob: Blob): Promise<Blob> {
@@ -210,6 +224,35 @@ export async function storeReview(edit: ReviewEdit) {
     transaction.onabort = () => reject(transaction.error);
   });
 }
+/** Approve/revoke matching imported edits atomically; never changes music files. */
+export async function setReviewApprovals(
+  sources: Pick<CoverJob, "id" | "fingerprint">[],
+  approved: boolean,
+) {
+  if (!sources.length) return 0;
+  const database = await db();
+  return new Promise<number>((resolve, reject) => {
+    const transaction = database.transaction(["edits", "summaries"], "readwrite");
+    const edits = transaction.objectStore("edits");
+    const summaries = transaction.objectStore("summaries");
+    let updated = 0;
+    for (const source of new Map(sources.map((source) => [source.id, source])).values()) {
+      const request = edits.get(source.id);
+      request.onsuccess = () => {
+        const record = request.result as ReviewEdit | undefined;
+        if (!record || record.saved || record.fingerprint !== source.fingerprint) return;
+        const next = { ...record, approved };
+        edits.put(next);
+        const { image: _image, sourceImage: _sourceImage, ...summary } = next;
+        summaries.put(summary);
+        updated++;
+      };
+    }
+    transaction.oncomplete = () => resolve(updated);
+    transaction.onerror = () => reject(transaction.error);
+    transaction.onabort = () => reject(transaction.error);
+  });
+}
 export async function readReview(id: string): Promise<ReviewEdit | undefined> {
   const database = await db();
   return new Promise((resolve, reject) => {
@@ -234,6 +277,51 @@ function checkZipEntry(entry: JSZip.JSZipObject, maximum: number) {
   if (typeof size === "number" && size > maximum)
     throw new Error(`ZIP entry too large: ${entry.name}`);
 }
+function sameTrackPaths(left: string, right: string): boolean {
+  try {
+    const paths = (value: string) => {
+      const tracks = JSON.parse(value);
+      if (
+        !Array.isArray(tracks) ||
+        !tracks.length ||
+        tracks.some(
+          (track) =>
+            !Array.isArray(track) ||
+            track.length !== 3 ||
+            typeof track[0] !== "string" ||
+            !Number.isFinite(track[1]) ||
+            !Number.isFinite(track[2]),
+        )
+      )
+        return undefined;
+      return tracks.map((track) => track[0]).sort();
+    };
+    const a = paths(left),
+      b = paths(right);
+    return Boolean(a && b && a.length === b.length && a.every((path, index) => path === b[index]));
+  } catch {
+    return false;
+  }
+}
+/** Recognize changes caused by our verified save, not arbitrary changed files. */
+async function knownReimport(
+  job: CoverJob,
+  entry: { id: string; fingerprint: string; sourceSha256: string },
+  actualHash: string,
+) {
+  if (!sameTrackPaths(job.fingerprint, entry.fingerprint)) return false;
+  for (const id of new Set([job.id, entry.id])) {
+    const previous = await readReview(id);
+    if (!previous || previous.fingerprint !== job.fingerprint) continue;
+    if (previous.exportFingerprint && previous.exportFingerprint !== entry.fingerprint) continue;
+    const originalHash = previous.exportArtworkSha256 || (await sha256(previous.sourceImage));
+    if (originalHash !== entry.sourceSha256) continue;
+    if (!previous.saved && !previous.exportFingerprint) continue;
+    const expected = await sha256(previous.saved ? previous.image : previous.sourceImage);
+    if (expected === actualHash) return true;
+  }
+  return false;
+}
 
 export async function importCoverBatch(
   file: File,
@@ -241,14 +329,22 @@ export async function importCoverBatch(
   progress: (message: string) => void,
   reportWarnings: (warnings: string[]) => void = () => undefined,
 ): Promise<ReviewSummary[]> {
-  if (file.size > 100 * 1024 * 1024) throw new Error("ZIP exceeds 100 MB. Please split the batch.");
+  if (file.size > MAX_ARCHIVE_BYTES) throw new Error("ZIP exceeds 512 MB. Please split the batch.");
   const zip = await JSZip.loadAsync(file);
+  let unpackedBytes = 0;
+  for (const entry of Object.values(zip.files)) {
+    const size = (entry as unknown as { _data?: { uncompressedSize?: number } })._data
+      ?.uncompressedSize;
+    if (typeof size === "number") unpackedBytes += size;
+    if (unpackedBytes > MAX_ARCHIVE_BYTES)
+      throw new Error("ZIP expands beyond 512 MB. Please split the batch.");
+  }
   const manifestFile = zip.file("manifest.json");
   if (!manifestFile)
     throw new Error(
       "Missing manifest.json. Use an exported Codex batch or assign a single image explicitly.",
     );
-  checkZipEntry(manifestFile, 2 * 1024 * 1024);
+  checkZipEntry(manifestFile, 16 * 1024 * 1024);
   const manifest = JSON.parse(await manifestFile.async("string"));
   if (
     manifest.version !== 1 ||
@@ -270,38 +366,73 @@ export async function importCoverBatch(
       zip.file(`edited/${entry.id}.jpg`) ||
       zip.file(`edited/${entry.id}.jpeg`);
     if (!edited) continue;
-    // Re-adding a source folder can create a new browser source ID. Match only
-    // a unique, identical folder and full track fingerprint, never title alone.
+    if (!/^originals\/cover-[a-f0-9]{16}\.(png|jpg)$/.test(entry.original))
+      throw new Error("Invalid original artwork path");
+    const original = zip.file(entry.original);
+    if (!original) throw new Error(`Missing original artwork for ${entry.album}`);
+    checkZipEntry(original, 16 * 1024 * 1024);
+    const exportedSource = await original.async("blob");
+    if (
+      exportedSource.size > 16 * 1024 * 1024 ||
+      (await sha256(exportedSource)) !== entry.sourceSha256
+    )
+      throw new Error("Original artwork does not match manifest");
+    // Source IDs can change when re-opening a folder. Never match by title alone.
     const direct = byId.get(entry.id);
     const matches = jobs.filter(
       (job) => job.path === entry.path && job.fingerprint === entry.fingerprint,
     );
-    const job =
+    let job =
       direct?.fingerprint === entry.fingerprint
         ? direct
         : matches.length === 1
           ? matches[0]
           : undefined;
     if (!job) {
+      const candidates = jobs.filter(
+        (source) =>
+          source.path === entry.path &&
+          source.album === entry.album &&
+          source.year === entry.year &&
+          sameTrackPaths(source.fingerprint, entry.fingerprint),
+      );
+      if (candidates.length === 1) job = candidates[0];
+    }
+    if (!job) {
       warnings.push(
         `${entry.album}: source files changed, missing or ambiguous. Export a fresh batch for this album.`,
       );
       continue;
     }
-    if (!/^originals\/cover-[a-f0-9]{16}\.(png|jpg)$/.test(entry.original))
-      throw new Error("Invalid original artwork path");
-    const original = zip.file(entry.original);
-    if (!original) throw new Error(`Missing original artwork for ${job.album}`);
-    checkZipEntry(original, 16 * 1024 * 1024);
-    const sourceImage = await original.async("blob");
-    if (sourceImage.size > 16 * 1024 * 1024 || (await sha256(sourceImage)) !== entry.sourceSha256)
-      throw new Error("Original artwork does not match manifest");
     checkZipEntry(edited, 16 * 1024 * 1024);
     progress(`Importing: ${job.album}`);
-    const actual = await sourceCover(job);
-    if ((await sha256(new Blob([new Uint8Array(actual.data)]))) !== entry.sourceSha256) {
+    const liveRows = await Promise.all(
+      job.files.map(async (row) => ({
+        ...row,
+        file: row.sourceHandle ? await row.sourceHandle.getFile() : row.file,
+      })),
+    );
+    if (fileFingerprint(liveRows) !== job.fingerprint) {
       warnings.push(
-        `${job.album}: source artwork changed since export. Export a fresh batch for this album.`,
+        `${job.album}: files changed on disk since scanning. Reload the source folder before importing.`,
+      );
+      continue;
+    }
+    let actual: NonNullable<Mp3Tags["cover"]>;
+    try {
+      actual = await sourceCover(job);
+    } catch {
+      warnings.push(
+        `${job.album}: current embedded artwork is missing or unreadable. Assign the edited image explicitly to this album.`,
+      );
+      continue;
+    }
+    const sourceImage = new Blob([new Uint8Array(actual.data)], { type: actual.mime });
+    const actualHash = await sha256(sourceImage);
+    const unchanged = job.fingerprint === entry.fingerprint && actualHash === entry.sourceSha256;
+    if (!unchanged && !(await knownReimport(job, entry, actualHash))) {
+      warnings.push(
+        `${job.album}: source files changed outside a verified Tag Maestro artwork save. Export a fresh batch or assign the edited image explicitly to this album.`,
       );
       continue;
     }
@@ -312,6 +443,8 @@ export async function importCoverBatch(
       saved: false,
       image: await normalizeCover(await edited.async("blob")),
       sourceImage,
+      exportFingerprint: entry.fingerprint,
+      exportArtworkSha256: entry.sourceSha256,
     });
   }
   if (!prepared.length)

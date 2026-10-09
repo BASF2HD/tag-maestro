@@ -1,6 +1,11 @@
 # Codex-assisted cover cleanup
 
 Approval is a review step, not a file write. After approval, click **Save approved albums**.
+The **Approve all imported artwork** checkbox approves or revokes approval for
+every matching, unsaved imported edit across all pages (not just the current filter).
+It excludes missing edits, changed source fingerprints and already-saved artwork.
+A mixed checkbox means only some eligible covers are approved. Approving all also
+selects those albums for the separate Save action; you can still approve individually.
 Only a verified direct write is labelled saved. The regular editor's read-only
 download/ZIP export leaves originals unchanged and edits pending. To overwrite
 original music, open the source with **Add Folder / Add Root Folder** in Chrome or
@@ -13,9 +18,17 @@ again rather than editing the manifest. Re-adding the identical source folder is
 supported only when folder paths, complete track fingerprints and artwork hashes
 match uniquely. Edited images remain unapproved until you explicitly approve them.
 
+You can re-import the same edited ZIP after saving artwork. The importer recognizes
+a previous verified Tag Maestro save using the full current file fingerprint,
+unchanged track paths, original batch provenance and current embedded artwork hash.
+Re-import resets approval/saved flags and compares the imported edit against the
+current disk artwork. Repeated imports before saving are supported too. Unrelated
+file changes, missing tracks and ambiguous editions still require a fresh export
+or explicit image assignment. Re-import never writes songs automatically.
+
 Open Tag Maestro in Chrome or Edge at `http://127.0.0.1:5173` and use **Add Root Folder** (read/write access), then **Tools → Codex-assisted cover cleanup**.
 
-1. Select up to 25 albums and export a ZIP. Each folder/edition has a distinct job ID. The ZIP contains originals, source fingerprints, a manifest and carefully scoped editing prompts.
+1. Choose **Albums per batch** (25, 50, 100, 250 or 500), then **Select this page** and export a ZIP. The remembered setting controls page size and export selection limit. Default: 25. ZIPs are limited to 512 MB compressed/uncompressed; individual covers remain limited to 16 MB. Use smaller batches for large original scans. Each folder/edition has a distinct job ID. The ZIP contains originals, source fingerprints, a manifest and carefully scoped editing prompts.
 2. Extract it into your Codex workspace and ask Codex to follow `CODEX-PROMPT.md` with the built-in image editor. This is a human-assisted workflow: Tag Maestro does not call Codex or an API automatically. No LaMa is used.
 3. Keep `manifest.json` and `originals/` unchanged. Return a ZIP with edited images in `edited/`, retaining exact job-ID filenames. Partial batches are accepted. Or explicitly assign one image to the currently displayed album.
 4. Review original/edited artwork. Check authentic lettering, logos and faces; AI can redraw details incorrectly. Approve each satisfactory cover.
@@ -28,6 +41,13 @@ Saving is sequential and each completed song is read back and verified. WAV audi
 This is not the independent API-backed version. Image editing happens in Codex, subject to the user's Codex usage limits. Tag Maestro never collects an OpenAI API key in this workflow.
 
 ## Verification
+
+Saving keeps the current original/edited previews visible, preloads new previews,
+uses a fixed-height progress area and applies completed library changes in one update
+(including verified partial saves if a later write fails).
+`node scripts/test-cover-batch-settings.mjs` checks batch-size persistence and fallbacks.
+The synthetic browser regression at `scripts/test-cover-reimport.html` also covers
+26-album export/import and observes preview continuity and library-update count during saving.
 
 `node scripts/test-file-saving.mjs` exercises cover replacement and removal,
 audio preservation, disk read-back verification, silently ignored writes and

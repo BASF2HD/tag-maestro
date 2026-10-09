@@ -3,35 +3,9 @@
 import jsmediatags from "jsmediatags/dist/jsmediatags.min.js";
 import type { AudioFile, PropertyMap, TagLib } from "taglib-wasm";
 import { replaceWavArtwork, wavPreservedBytes } from "./wav-artwork";
-
-export type AudioFormat = "mp3" | "m4a" | "flac" | "wav" | "other";
-
-export function detectFormat(file: File): AudioFormat {
-  const n = file.name.toLowerCase();
-  if (n.endsWith(".mp3") || file.type === "audio/mpeg") return "mp3";
-  if (
-    n.endsWith(".m4a") ||
-    n.endsWith(".mp4") ||
-    file.type === "audio/mp4" ||
-    file.type === "audio/x-m4a"
-  )
-    return "m4a";
-  if (n.endsWith(".flac") || file.type === "audio/flac" || file.type === "audio/x-flac")
-    return "flac";
-  if (
-    n.endsWith(".wav") ||
-    file.type === "audio/wav" ||
-    file.type === "audio/wave" ||
-    file.type === "audio/x-wav"
-  )
-    return "wav";
-  return "other";
-}
-
-export const SUPPORTED_EXTS = [".mp3", ".m4a", ".flac", ".wav"] as const;
+import { detectFormat, mimeForFormat, requireTagWritable, type AudioFormat } from "./audio-formats";
+export { detectFormat, SUPPORTED_EXTS, SUPPORTED_ACCEPT, type AudioFormat } from "./audio-formats";
 export const IMAGE_EXTS = [".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif"] as const;
-export const SUPPORTED_ACCEPT =
-  "audio/mpeg,audio/mp4,audio/x-m4a,audio/flac,audio/x-flac,audio/wav,audio/x-wav,.mp3,.m4a,.flac,.wav";
 
 export interface Mp3Tags {
   title: string;
@@ -262,6 +236,7 @@ export async function readMp3(
 }
 
 export async function writeTagsToBlob(m: Mp3File): Promise<Blob> {
+  requireTagWritable(m.format);
   const arrayBuffer = await m.file.arrayBuffer();
   if (m.format === "other") {
     throw new Error(`Unsupported audio format: ${m.file.name}`);
@@ -298,7 +273,7 @@ export async function writeCoverToBlob(
     if (before.length !== after.length || before.some((byte, index) => byte !== after[index]))
       throw new Error("Audio/metadata preservation check failed; original was not changed");
   } else {
-    if (format === "other") throw new Error("Unsupported audio format");
+    requireTagWritable(format);
     const taglib = await getTagLib();
     output = await taglib.edit({ name: file.name, data: input }, (audio) => {
       const other = audio.getPictures().filter((picture) => picture.type !== "FrontCover");
@@ -526,14 +501,6 @@ function coversEqual(a: Mp3Tags["cover"], b: Mp3Tags["cover"]): boolean {
     if (a.data[i] !== b.data[i]) return false;
   }
   return true;
-}
-
-function mimeForFormat(format: AudioFormat): string {
-  if (format === "mp3") return "audio/mpeg";
-  if (format === "m4a") return "audio/mp4";
-  if (format === "flac") return "audio/flac";
-  if (format === "wav") return "audio/wav";
-  return "application/octet-stream";
 }
 
 function updateWavCover(wav: Uint8Array, cover: Mp3Tags["cover"]): Uint8Array {

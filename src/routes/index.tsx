@@ -31,6 +31,8 @@ import {
   Moon,
   ChevronDown,
   Trash2,
+  Play,
+  Pause,
   X,
 } from "@/components/icons";
 import {
@@ -51,6 +53,11 @@ import { FolderRenameDialog } from "@/components/FolderRenameDialog";
 import { CoverCleanupDialog } from "@/components/CoverCleanupDialog";
 import { EditableTableCell as TdCell } from "@/components/EditableTableCell";
 import { writeVerifiedFile } from "@/lib/verified-file-write";
+import { AudioPreview, type PreviewState } from "@/lib/audio-preview";
+import { deleteSongBatch, nextAfterDeletion } from "@/lib/delete-song";
+import { PreviewTransport, RowSeekControl } from "@/components/PreviewControls";
+import { previewPage, previewScrollTop } from "@/lib/preview-visibility";
+import { defaultTableSettings, loadTableSettings, saveTableSettings } from "@/lib/table-settings";
 import { BulkFieldEditDialog, type BulkFieldKey } from "@/components/BulkFieldEditDialog";
 import { ExtractTextDialog, type ExtractTargetKey } from "@/components/ExtractTextDialog";
 import {
@@ -174,6 +181,9 @@ const TABLE_COLUMNS: TableColumn[] = [
 
 const DEFAULT_VISIBLE_COLUMNS = new Set(
   TABLE_COLUMNS.filter((c) => c.defaultVisible).map((c) => c.key),
+);
+const DEFAULT_TABLE_SETTINGS = defaultTableSettings<TableColumnKey>(
+  TABLE_COLUMNS.map((column) => column.key), [...DEFAULT_VISIBLE_COLUMNS],
 );
 
 const EDITOR_MIN_WIDTH = 280;
@@ -310,6 +320,21 @@ function TagMaestro() {
   }, [theme]);
 
   const [files, setFiles] = useState<Mp3File[]>([]);
+  const [preview, setPreview] = useState<PreviewState>({ id: null, playing: false, loading: false });
+  const previewRef = useRef<AudioPreview | null>(null);
+  const deletingRef = useRef(false);
+  useEffect(() => {
+    const player = new AudioPreview(new Audio(), setPreview, (message) => toast.error(message));
+    previewRef.current = player;
+    return () => {
+      player.destroy();
+      previewRef.current = null;
+    };
+  }, []);
+  useEffect(() => {
+    const player = previewRef.current;
+    if (player?.state.id && !files.some((file) => file.id === player.state.id)) player.stop();
+  }, [files]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState<string | null>(null);
   const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
@@ -413,7 +438,7 @@ function TagMaestro() {
       return SUPPORTED_EXTS.some((ext) => n.endsWith(ext));
     });
     if (!arr.length) {
-      toast.error("No supported audio files (MP3, M4A, FLAC, WAV)");
+      toast.error("No recognised music files. Choose MP3, M4A, AAC, FLAC, WAV, Ogg, Opus, AIFF or another supported music container.");
       return;
     }
     setBusy(`Reading ${arr.length} file${arr.length > 1 ? "s" : ""}…`);
@@ -1021,6 +1046,48 @@ function TagMaestro() {
     );
   }
 
+  async function deleteSongs(ids: string[]): Promise<string[]> {
+    if (busy || importProgress || deletingRef.current) return [];
+    const requested = new Set(ids);
+    const songs = files.filter((file) => requested.has(file.id));
+    if (!songs.length) return [];
+    deletingRef.current = true;
+    try {
+      const result = await deleteSongBatch(songs, (song, index) => {
+        setBusy(`Deleting ${index + 1} of ${songs.length}: ${song.file.name}…`);
+        if (previewRef.current?.state.id === song.id) previewRef.current.stop();
+      });
+      const deleted = new Set(result.deleted);
+      if (deleted.size) {
+        setFiles((previous) => previous.filter((file) => !deleted.has(file.id)));
+        setSelected((previous) => new Set([...previous].filter((id) => !deleted.has(id))));
+        const pathsBySource = new Map<string, string[]>();
+        for (const song of songs) {
+          if (!deleted.has(song.id)) continue;
+          coverProbeIds.current.delete(song.id);
+          if (song.librarySourceId && song.libraryRelativePath) {
+            const paths = pathsBySource.get(song.librarySourceId) || [];
+            paths.push(song.libraryRelativePath);
+            pathsBySource.set(song.librarySourceId, paths);
+          }
+        }
+        toast.success(`Deleted ${deleted.size} song file${deleted.size === 1 ? "" : "s"} from album folders`);
+        for (const [sourceId, paths] of pathsBySource) {
+          await excludeLibraryPaths(sourceId, paths).catch(() =>
+            toast.error("Files were deleted, but saved-library storage could not be updated. Reload the folder."),
+          );
+        }
+      }
+      if (result.failed.length) {
+        toast.error(`${result.failed.length} song file(s) not deleted; rows retained. ${result.failed[0].song.file.name}: ${result.failed[0].message}`);
+      }
+      return result.deleted;
+    } finally {
+      deletingRef.current = false;
+      setBusy(null);
+    }
+  }
+
   async function removeSelected() {
     const removed = files.filter((file) => selected.has(file.id));
     const remaining = files.filter((file) => !selected.has(file.id));
@@ -1323,10 +1390,18 @@ function TagMaestro() {
         open={coverCleanupOpen}
         onOpenChange={setCoverCleanupOpen}
         files={files}
-        onTrackSaved={(row, saved, cover) => setFiles(previous => previous.map(item => item.id === row.id ? {
-          ...item, file: saved, coverEdited: false, tags: { ...item.tags, cover }, original: { ...item.original, cover },
-          meta: { ...item.meta, size: `${(saved.size / (1024 * 1024)).toFixed(2)} MB`, modified: new Date(saved.lastModified).toLocaleString() },
-        } : item))}
+        onTracksSaved={updates => {
+          const savedById = new Map(updates.map(update => [update.row.id, update]));
+          setFiles(previous => previous.map(item => {
+            const update = savedById.get(item.id);
+            if (!update) return item;
+            const { file: saved, cover } = update;
+            return {
+              ...item, file: saved, coverEdited: false, tags: { ...item.tags, cover }, original: { ...item.original, cover },
+              meta: { ...item.meta, size: `${(saved.size / (1024 * 1024)).toFixed(2)} MB`, modified: new Date(saved.lastModified).toLocaleString() },
+            };
+          }));
+        }}
       />
       <header className="relative z-30 shrink-0 border-b border-border bg-sidebar/60 backdrop-blur px-3 py-2 flex items-center gap-2">
         <div className="flex items-center gap-2">
@@ -1521,6 +1596,16 @@ function TagMaestro() {
               onEditFilename={updateFilename}
               onRemoveSelected={removeSelected}
               onRemoveAll={removeAll}
+              preview={preview}
+              previewPlayer={previewRef.current}
+              activePreviewTrack={files.find((file) => file.id === preview.id)}
+              allTracks={files}
+              onRevealPreview={(id) => {
+                if (!filtered.some((file) => file.id === id)) setFilter("");
+              }}
+              onPreview={(file) => void previewRef.current?.toggle(file)}
+              onDelete={deleteSongs}
+              actionsDisabled={Boolean(busy || importProgress)}
             />
           )}
         </main>
@@ -1677,7 +1762,7 @@ function EmptyState({
           <Upload className="h-5 w-5" />
         </div>
         <h2 className="text-base font-semibold">Drop audio files or folders here</h2>
-        <p className="mt-1 text-[11px] text-muted-foreground">MP3 · M4A · FLAC · WAV</p>
+        <p className="mt-1 text-[11px] text-muted-foreground">MP3 · M4A · AAC · FLAC · WAV · Ogg · Opus · AIFF · WMA · APE · WavPack · MPC · TTA · Speex</p>
         <p className="mt-1 text-xs text-muted-foreground">
           Everything stays in your browser. No uploads, no accounts.
         </p>
@@ -1752,7 +1837,7 @@ const defaultWidths: Record<string, number> = {
   size: 80,
   modified: 150,
 };
-function FileTable({
+export function FileTable({
   files,
   selected,
   filter,
@@ -1766,6 +1851,14 @@ function FileTable({
   onEditFilename,
   onRemoveSelected,
   onRemoveAll,
+  preview,
+  onPreview,
+  onDelete,
+  actionsDisabled,
+  previewPlayer,
+  activePreviewTrack,
+  onRevealPreview,
+  allTracks,
 }: {
   files: Mp3File[];
   selected: Set<string>;
@@ -1780,6 +1873,14 @@ function FileTable({
   onEditFilename: (id: string, value: string) => void;
   onRemoveSelected: () => void;
   onRemoveAll: () => void;
+  preview: PreviewState;
+  onPreview: (file: Mp3File) => void;
+  onDelete: (ids: string[]) => Promise<string[]>;
+  actionsDisabled: boolean;
+  previewPlayer: AudioPreview | null;
+  activePreviewTrack?: Mp3File;
+  onRevealPreview?: (id: string) => void;
+  allTracks?: Mp3File[];
 }) {
   const [visibleColumns, setVisibleColumns] = useState<Set<TableColumnKey>>(
     () => new Set(DEFAULT_VISIBLE_COLUMNS),
@@ -1788,7 +1889,7 @@ function FileTable({
   
   // Column reordering order state
   const [columnOrder, setColumnOrder] = useState<TableColumnKey[]>(() =>
-    TABLE_COLUMNS.map((c) => c.key),
+    [...DEFAULT_TABLE_SETTINGS.columnOrder],
   );
 
   // Drag and drop states
@@ -1843,21 +1944,50 @@ function FileTable({
   }
 
   // Sorting states
-  const [sortKey, setSortKey] = useState<TableColumnKey | null>(null);
+  const [sortKey, setSortKey] = useState<TableColumnKey | null>("album");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
 
   // Container ref to directly set CSS variables on DOM during resize
   const containerRef = useRef<HTMLDivElement>(null);
+  const tableScrollRef = useRef<HTMLDivElement>(null);
+  const revealRowRef = useRef<HTMLTableRowElement>(null);
+  const [revealId, setRevealId] = useState<string | null>(null);
 
   // Pagination states
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(1000);
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const settingsWarningRef = useRef(false);
+  // Load after hydration; never overwrite saved preferences with initial defaults.
+  useEffect(() => {
+    const saved = loadTableSettings(DEFAULT_TABLE_SETTINGS);
+    setColumnOrder(saved.columnOrder);
+    setVisibleColumns(new Set(saved.visibleColumns));
+    setColumnWidths(saved.columnWidths);
+    setSortKey(saved.sortKey);
+    setSortOrder(saved.sortOrder);
+    setPageSize(saved.pageSize);
+    setSettingsLoaded(true);
+  }, []);
+  useEffect(() => {
+    if (!settingsLoaded) return;
+    const saved = saveTableSettings({ columnOrder, visibleColumns: [...visibleColumns], columnWidths, sortKey, sortOrder, pageSize });
+    if (!saved && !settingsWarningRef.current) {
+      settingsWarningRef.current = true;
+      toast.error("Table preferences cannot be saved: browser storage is unavailable.");
+    }
+  }, [settingsLoaded, columnOrder, visibleColumns, columnWidths, sortKey, sortOrder, pageSize]);
   const [rowMenu, setRowMenu] = useState<{ id: string; x: number; y: number } | null>(null);
 
   // Reset current page when the files count, search filter, or sort key/order changes
+  const pageResetKeyRef = useRef<string | null>(null);
   useEffect(() => {
-    setCurrentPage(1);
-  }, [files.length, filter, sortKey, sortOrder]);
+    const key = JSON.stringify([files.length, filter, sortKey, sortOrder]);
+    if (pageResetKeyRef.current === key) return;
+    pageResetKeyRef.current = key;
+    // Clearing a search to reveal playback must not override its requested page.
+    if (!revealId) setCurrentPage(1);
+  }, [files.length, filter, sortKey, sortOrder, revealId]);
 
   // Compute sorted files list
   const sortedFiles = useMemo(() => {
@@ -1910,6 +2040,10 @@ function FileTable({
         }
       }
 
+      if (comparison === 0 && sortKey === "album") {
+        const number = (value: string) => parseInt(value.split("/")[0], 10) || 0;
+        return number(a.tags.discnumber) - number(b.tags.discnumber) || number(a.tags.track) - number(b.tags.track) || a.file.name.localeCompare(b.file.name, undefined, { numeric: true, sensitivity: "base" });
+      }
       return sortOrder === "asc" ? comparison : -comparison;
     });
 
@@ -1934,6 +2068,52 @@ function FileTable({
     const start = (activePage - 1) * pageSize;
     return sortedFiles.slice(start, start + pageSize);
   }, [sortedFiles, activePage, pageSize]);
+
+  // A footer action reveals once, rather than forcing scroll on every playback tick.
+  useLayoutEffect(() => {
+    if (!revealId) return;
+    const page = previewPage(sortedFiles, revealId, pageSize);
+    if (page === null) return; // Parent may be clearing a filter hiding this song.
+    if (activePage !== page) {
+      setCurrentPage(page);
+      return;
+    }
+    const scroller = tableScrollRef.current;
+    const row = revealRowRef.current;
+    if (!scroller || !row) return;
+    const viewport = scroller.getBoundingClientRect();
+    const bounds = row.getBoundingClientRect();
+    const headerHeight = scroller.querySelector("thead")?.getBoundingClientRect().height || 0;
+    scroller.scrollTop = previewScrollTop(
+      scroller.scrollTop, viewport.top, scroller.clientHeight, headerHeight, bounds.top, bounds.bottom,
+    );
+    setRevealId(null);
+  }, [revealId, sortedFiles, activePage, pageSize]);
+
+  function previewFromFooter(file: Mp3File) {
+    if (preview.id !== file.id || (!preview.playing && !preview.loading)) {
+      setRevealId(file.id);
+      onRevealPreview?.(file.id);
+    }
+    onPreview(file);
+  }
+
+  const deleteInFlightRef = useRef(false);
+  async function deleteAndContinue(ids: string[]) {
+    if (actionsDisabled || deleteInFlightRef.current || !ids.length) return;
+    deleteInFlightRef.current = true;
+    const activeId = previewPlayer?.state.id || preview.id;
+    const order = sortedFiles.some((file) => file.id === activeId) ? sortedFiles : allTracks || sortedFiles;
+    try {
+      const deleted = new Set(await onDelete(ids));
+      const next = nextAfterDeletion(order, activeId, deleted);
+      // A user-initiated preview change must not be interrupted by deletion completion.
+      const currentId = previewPlayer?.state.id;
+      if (next && (!currentId || deleted.has(currentId))) previewFromFooter(next);
+    } finally {
+      deleteInFlightRef.current = false;
+    }
+  }
 
   function handleSort(key: TableColumnKey) {
     if (isDragging || key === "cover") return;
@@ -2168,7 +2348,7 @@ function FileTable({
       )}
 
       {/* Table container */}
-      <div className="flex-1 overflow-auto bg-white text-slate-950 dark:bg-background dark:text-foreground">
+      <div ref={tableScrollRef} data-testid="song-table-scroll" className="flex-1 overflow-auto bg-white text-slate-950 dark:bg-background dark:text-foreground">
         <table className="w-full border-collapse table-fixed bg-white text-xs text-slate-950 dark:bg-background dark:text-foreground">
           <thead className="sticky top-0 z-10 border-b border-slate-300 bg-[#f3f4f6] text-[11px] leading-none text-slate-700 dark:border-border dark:bg-secondary/80 dark:text-muted-foreground">
             <tr className="h-[19px] border-b border-slate-300 bg-[#f3f4f6] dark:border-border dark:bg-secondary/30">
@@ -2180,6 +2360,9 @@ function FileTable({
                   aria-label="Select page"
                   className="h-[11px] w-[11px] align-middle accent-primary"
                 />
+              </th>
+              <th style={{ width: 160, minWidth: 160, maxWidth: 160 }} className="px-2 py-0 text-left font-semibold">
+                Actions
               </th>
               {visible.map((col) => {
                 const colStyle = {
@@ -2193,6 +2376,7 @@ function FileTable({
                 return (
                   <th
                     key={col.key}
+                    aria-sort={sortKey === col.key ? sortOrder === "asc" ? "ascending" : "descending" : "none"}
                     style={colStyle}
                     draggable={col.key !== "cover"}
                     onDragStart={(e) => handleDragStart(e, col.key)}
@@ -2259,8 +2443,11 @@ function FileTable({
               return (
                 <tr
                   key={f.id}
+                  ref={f.id === revealId ? revealRowRef : undefined}
                   data-selected={isSel}
-                  className="h-6 border-b border-slate-200 bg-white hover:bg-slate-50 data-[selected=true]:bg-blue-50 data-[selected=true]:hover:bg-blue-100 dark:border-border/60 dark:bg-transparent dark:hover:bg-accent/40 dark:data-[selected=true]:bg-primary/10 dark:data-[selected=true]:hover:bg-primary/15"
+                  data-preview-active={preview.id === f.id}
+                  aria-current={preview.id === f.id ? "true" : undefined}
+                  className="h-6 border-b border-slate-200 bg-white hover:bg-slate-50 data-[selected=true]:bg-blue-50 data-[selected=true]:hover:bg-blue-100 dark:border-border/60 dark:bg-transparent dark:hover:bg-accent/40 dark:data-[selected=true]:bg-primary/10 dark:data-[selected=true]:hover:bg-primary/15 data-[preview-active=true]:bg-amber-50! data-[preview-active=true]:hover:bg-amber-100! dark:data-[preview-active=true]:bg-primary/15! dark:data-[preview-active=true]:hover:bg-primary/20!"
                   onClick={(e) =>
                     handleRowSelection(f.id, {
                       isCheckbox: false,
@@ -2286,6 +2473,31 @@ function FileTable({
                       aria-label="Select"
                       className="h-3 w-3 align-middle accent-primary cursor-pointer"
                     />
+                  </td>
+                  <td style={{ width: 160, minWidth: 160, maxWidth: 160 }} className="px-2 py-0" onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()} onContextMenu={(e) => e.stopPropagation()}>
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        className={`grid h-5 w-6 place-items-center rounded-[4px] hover:bg-slate-200 dark:hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary disabled:opacity-40 ${preview.id === f.id ? "text-primary" : "text-slate-600 dark:text-muted-foreground"}`}
+                        disabled={actionsDisabled}
+                        aria-label={`${preview.id === f.id && (preview.playing || preview.loading) ? "Pause" : "Play"} ${f.file.name}`}
+                        title={preview.id === f.id && preview.loading ? "Cancel loading preview" : preview.id === f.id && preview.playing ? "Pause preview" : "Play original song preview"}
+                        onClick={() => onPreview(f)}
+                      >
+                        {preview.id === f.id && preview.loading ? <Loader2 className="h-4 w-4 animate-spin" /> : preview.id === f.id && preview.playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+                      </button>
+                      <RowSeekControl player={previewPlayer} file={f} active={preview.id === f.id} disabled={actionsDisabled} />
+                      <button
+                        type="button"
+                        className="grid h-5 w-6 place-items-center rounded-[4px] text-slate-500 hover:bg-red-50 hover:text-red-700 dark:text-muted-foreground dark:hover:bg-destructive/10 dark:hover:text-destructive focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-destructive disabled:opacity-40"
+                        disabled={actionsDisabled}
+                        aria-label={`Delete ${f.file.name} from disk`}
+                        title="Permanently delete original song file immediately (no undo)"
+                        onClick={() => void deleteAndContinue([f.id])}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
                   </td>
                   {visible.map((col) => (
                     <TableCell
@@ -2393,6 +2605,7 @@ function FileTable({
         </div>
       )}
 
+      <PreviewTransport player={previewPlayer} preview={preview} tracks={sortedFiles} activeTrack={activePreviewTrack || files.find((file) => file.id === preview.id)} selected={selected} disabled={actionsDisabled} onPreview={previewFromFooter} onDelete={(id) => void deleteAndContinue([id])} onDeleteSelected={() => void deleteAndContinue([...selected])} />
       {/* Pagination Footer */}
       <div className="relative border-t border-border px-3 py-1.5 flex items-center justify-between text-xs bg-sidebar/40 backdrop-blur select-none h-11 shrink-0 gap-3">
         {/* Left: Track counters and Selection */}
