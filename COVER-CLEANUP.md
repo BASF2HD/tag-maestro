@@ -1,5 +1,12 @@
 # Codex-assisted cover cleanup
 
+Approval is a review step, not a file write. After approval, click **Save approved albums**.
+Only a verified direct write is labelled saved. The regular editor's read-only
+download/ZIP export leaves originals unchanged and edits pending. To overwrite
+original music, open the source with **Add Folder / Add Root Folder** in Chrome or
+Edge and grant write access. **Reload tags from files** now reopens disk files,
+including embedded artwork, instead of retaining the displayed cover.
+
 ZIP import loads unchanged albums even when other albums have changed since
 export. Skipped albums are listed above the comparison view; export those albums
 again rather than editing the manifest. Re-adding the identical source folder is
@@ -21,5 +28,9 @@ Saving is sequential and each completed song is read back and verified. WAV audi
 This is not the independent API-backed version. Image editing happens in Codex, subject to the user's Codex usage limits. Tag Maestro never collects an OpenAI API key in this workflow.
 
 ## Verification
+
+`node scripts/test-file-saving.mjs` exercises cover replacement and removal,
+audio preservation, disk read-back verification, silently ignored writes and
+write failures using synthetic PCM audio in a temporary folder only.
 
 `node scripts/test-wav-artwork.mjs` tests the shared artwork-only WAV writer. `scripts/verify-cover-cleanup.mjs` is deliberately scoped to the two reviewed Tum Bin/Masti working folders for this initial test, not a general bulk command. The `.design-qa/cover-cleanup-test/verification.json` report records audio and metadata checks; `original-id3-*.bin` retains original artwork tags for the test. Do not rerun an overwrite test on unreviewed sources.

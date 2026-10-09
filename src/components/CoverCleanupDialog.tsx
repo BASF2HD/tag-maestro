@@ -142,6 +142,30 @@ export function CoverCleanupDialog({ open, onOpenChange, files, onTrackSaved }: 
     setSummaries(Object.fromEntries(items.map((item) => [item.id, item])));
     setRevision((value) => value + 1);
   }
+  async function saveAlbums(ids: string[]) {
+    let count = 0;
+    try {
+      for (const id of ids) {
+        const source = jobs.find((item) => item.id === id);
+        const record = await readReview(id);
+        if (!source || !record) throw new Error("Reviewed cover missing");
+        await saveReviewedAlbum(
+          source,
+          record,
+          (row, saved, cover) => {
+            onTrackSaved(row, saved, cover);
+            count++;
+          },
+          setMessage,
+        );
+      }
+      setMessage(
+        `Saved and read-back verified artwork in ${count} original ${count === 1 ? "song" : "songs"}. No audio encoding performed.`,
+      );
+    } finally {
+      await refresh();
+    }
+  }
   const toggle = (id: string) =>
     setSelected((previous) => {
       const next = new Set(previous);
@@ -153,7 +177,7 @@ export function CoverCleanupDialog({ open, onOpenChange, files, onTrackSaved }: 
     const item = summaries[id];
     if (!item) return "Awaiting edit";
     if (item.fingerprint !== fingerprint) return "Source changed";
-    return item.saved ? "Saved ✓" : item.approved ? "Approved" : "Needs review";
+    return item.saved ? "Saved ✓" : item.approved ? "Approved — not saved" : "Needs review";
   }
   return (
     <Dialog
@@ -212,29 +236,7 @@ export function CoverCleanupDialog({ open, onOpenChange, files, onTrackSaved }: 
           <Button
             size="sm"
             disabled={busy || !approved.length}
-            onClick={() =>
-              void run(async () => {
-                let count = 0;
-                for (const id of approved) {
-                  const job = jobs.find((item) => item.id === id)!;
-                  const record = await readReview(id);
-                  if (!record) throw new Error("Reviewed cover missing");
-                  await saveReviewedAlbum(
-                    job,
-                    record,
-                    (row, saved, cover) => {
-                      onTrackSaved(row, saved, cover);
-                      count++;
-                    },
-                    setMessage,
-                  );
-                }
-                await refresh();
-                setMessage(
-                  `Saved and read-back verified artwork in ${count} songs. No audio encoding performed.`,
-                );
-              })
-            }
+            onClick={() => void run(() => saveAlbums(approved))}
           >
             <Save className="mr-1 h-4 w-4" />
             Save {approved.length} approved albums
@@ -464,10 +466,27 @@ export function CoverCleanupDialog({ open, onOpenChange, files, onTrackSaved }: 
                 Approve artwork replacement in all {job?.files.length || 0} songs in this album.
               </span>
             </label>
+            <div className="mt-3 flex items-center gap-3">
+              <Button
+                size="sm"
+                disabled={busy || !job || !eligible(job.id)}
+                onClick={() => {
+                  if (job) void run(() => saveAlbums([job.id]));
+                }}
+              >
+                <Save className="mr-1 h-4 w-4" />
+                Save this album to originals
+              </Button>
+              <span className="text-[11px] text-muted-foreground">
+                {edit?.saved
+                  ? "Original files saved and verified."
+                  : "Approval alone does not save files."}
+              </span>
+            </div>
             <p className="mt-2 text-[11px] text-muted-foreground">
               AI can redraw fine lettering. Reject imperfect edits. Direct saving requires folder
               write access in Chrome or Edge. Other unsaved tag edits are not applied. Loose cover
-              files are not changed. Only approved, selected album folders are written.
+              files are not changed. Only approved albums you choose to save are written.
             </p>
           </section>
         </div>

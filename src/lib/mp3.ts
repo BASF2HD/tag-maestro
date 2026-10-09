@@ -74,6 +74,8 @@ export interface Mp3File {
   meta: FileMeta;
   original: Mp3Tags;
   dirty: boolean;
+  /** Explicit artwork edits, including deletion, must not be undone by lazy loading. */
+  coverEdited?: boolean;
   folderName: string;
   folderPath: string;
   editedFolderName: string;
@@ -271,10 +273,14 @@ export async function writeTagsToBlob(m: Mp3File): Promise<Blob> {
     (audioFile) => applyTagChanges(audioFile, m),
   );
   const tagged =
-    m.format === "wav" && !coversEqual(m.tags.cover, m.original.cover)
+    m.format === "wav" && (m.coverEdited || !coversEqual(m.tags.cover, m.original.cover))
       ? updateWavCover(output, m.tags.cover)
       : output;
-  return new Blob([new Uint8Array(tagged)], { type: m.file.type || mimeForFormat(m.format) });
+  const blob = new Blob([new Uint8Array(tagged)], { type: m.file.type || mimeForFormat(m.format) });
+  if (m.coverEdited || !coversEqual(m.tags.cover, m.original.cover)) {
+    await verifyWrittenArtwork(new File([blob], m.file.name), m.tags.cover);
+  }
+  return blob;
 }
 
 /** Cover cleanup never applies pending text edits, renames or audio encoding. */
@@ -302,7 +308,22 @@ export async function writeCoverToBlob(
       ]);
     });
   }
-  return new Blob([new Uint8Array(output)], { type: file.type || mimeForFormat(format) });
+  const blob = new Blob([new Uint8Array(output)], { type: file.type || mimeForFormat(format) });
+  await verifyWrittenArtwork(new File([blob], file.name), cover);
+  return blob;
+}
+
+/** Verify the embedded picture itself, not an editor thumbnail or folder JPEG. */
+export async function verifyWrittenArtwork(file: File, expected: Mp3Tags["cover"]) {
+  const actual =
+    detectFormat(file) === "wav"
+      ? readWavCover(new Uint8Array(await file.arrayBuffer()))
+      : (await readTextTagsWithTagLib(file, true)).cover;
+  if (!coversEqual(actual, expected)) {
+    throw new Error(
+      `Artwork verification failed for ${file.name}. Original file was not marked saved.`,
+    );
+  }
 }
 
 async function readTagsWithJsMedia(file: File, readEmbeddedCover: boolean): Promise<Mp3Tags> {
@@ -468,7 +489,7 @@ function applyTagChanges(audioFile: AudioFile, m: Mp3File): void {
 
   audioFile.setProperties({ ...audioFile.properties(), ...managed });
 
-  if (coversEqual(t.cover, m.original.cover)) return;
+  if (!m.coverEdited && coversEqual(t.cover, m.original.cover)) return;
   // TagLib's WAV backend writes text fields but not embedded pictures.
   // WAV artwork is handled as a standard RIFF ID3 chunk after TagLib saves.
   if (m.format === "wav") return;

@@ -1,4 +1,5 @@
 import JSZip from "jszip";
+import { writeVerifiedFile } from "./verified-file-write";
 import { readMp3, writeCoverToBlob, type Mp3File, type Mp3Tags } from "./mp3";
 
 export type CoverJob = {
@@ -363,20 +364,7 @@ export async function saveReviewedAlbum(
         `${row.file.name} changed during saving. Previously completed songs stay saved.`,
       );
     const blob = await writeCoverToBlob(live, cover);
-    const expected = await sha256(blob);
-    const writable = await handle.createWritable();
-    try {
-      await writable.write(blob);
-      await writable.close();
-    } catch (error) {
-      await writable.abort().catch(() => {});
-      throw error;
-    }
-    const saved = await handle.getFile();
-    if ((await sha256(saved)) !== expected)
-      throw new Error(
-        `Read-back verification failed: ${row.file.name}. Check the disk before continuing.`,
-      );
+    const saved = await writeVerifiedFile(handle, blob);
     onTrackSaved(row, saved, cover);
     updated.push({ ...row, file: saved });
   }

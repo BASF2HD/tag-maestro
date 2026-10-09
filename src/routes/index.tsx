@@ -49,6 +49,8 @@ import {
 } from "@/lib/mp3";
 import { FolderRenameDialog } from "@/components/FolderRenameDialog";
 import { CoverCleanupDialog } from "@/components/CoverCleanupDialog";
+import { EditableTableCell as TdCell } from "@/components/EditableTableCell";
+import { writeVerifiedFile } from "@/lib/verified-file-write";
 import { BulkFieldEditDialog, type BulkFieldKey } from "@/components/BulkFieldEditDialog";
 import { ExtractTextDialog, type ExtractTargetKey } from "@/components/ExtractTextDialog";
 import {
@@ -349,10 +351,15 @@ function TagMaestro() {
   const hasDirtyFiles = useMemo(() => {
     return files.some((f) => f.dirty);
   }, [files]);
+  const selectedDirty = selectedFiles.filter((file) => file.dirty);
+  const saveTargets = selectedDirty.length ? selectedDirty : files.filter((file) => file.dirty);
+  const savesOriginals = saveTargets.length > 0 && saveTargets.every((file) =>
+    file.sourceHandle && (directSaveFilename(file) === file.file.name || file.sourceDirectoryHandle),
+  );
 
   useEffect(() => {
     const first = selectedFiles[0];
-    if (!first || first.tags.cover || coverProbeIds.current.has(first.id)) return;
+    if (!first || first.coverEdited || first.tags.cover || coverProbeIds.current.has(first.id)) return;
 
     coverProbeIds.current.add(first.id);
     let cancelled = false;
@@ -368,12 +375,8 @@ function TagMaestro() {
       if (cancelled || !cover) return;
       setFiles((prev) =>
         prev.map((f) => {
-          const sameAlbumGroup =
-            Boolean(first.folderPath || first.tags.album) &&
-            f.folderPath === first.folderPath &&
-            f.tags.album === first.tags.album;
           const sameTrack = f.id === first.id;
-          return !f.tags.cover && (sameTrack || sameAlbumGroup)
+          return !f.coverEdited && !f.tags.cover && sameTrack
             ? { ...f, tags: { ...f.tags, cover }, original: { ...f.original, cover } }
             : f;
         }),
@@ -1000,6 +1003,8 @@ function TagMaestro() {
 
   function applyToSelected(patch: Partial<Mp3Tags>) {
     if (!selected.size) return;
+    const editsCover = Object.prototype.hasOwnProperty.call(patch, "cover");
+    if (editsCover) selected.forEach((id) => coverProbeIds.current.add(id));
     setFiles((prev) =>
       prev.map((f) => {
         if (!selected.has(f.id)) return f;
@@ -1011,7 +1016,7 @@ function TagMaestro() {
             (next as any)[k] = v;
           }
         }
-        return { ...f, tags: next, dirty: true };
+        return { ...f, tags: next, dirty: true, coverEdited: editsCover || f.coverEdited };
       }),
     );
   }
@@ -1072,7 +1077,7 @@ function TagMaestro() {
       return;
     }
 
-    const refreshed = new Map<string, Mp3Tags>();
+    const refreshed = new Map<string, Mp3File>();
     let failed = 0;
     setBusy(`Reloading tags… 0/${targets.length}`);
     setImportProgress({
@@ -1086,14 +1091,15 @@ function TagMaestro() {
         const file = targets[index];
         try {
           const loaded = await readMp3(
-            file.file,
+            file.sourceHandle ? await file.sourceHandle.getFile() : file.file,
             file.meta.path || file.libraryRelativePath || file.file.name,
             true,
-            false,
+            true,
             file.sourceHandle,
             file.sourceDirectoryHandle,
           );
-          refreshed.set(file.id, { ...loaded.tags, cover: file.tags.cover });
+          refreshed.set(file.id, loaded);
+          coverProbeIds.current.add(file.id);
         } catch {
           failed += 1;
         }
@@ -1112,8 +1118,8 @@ function TagMaestro() {
 
       setFiles((current) =>
         current.map((file) => {
-          const tags = refreshed.get(file.id);
-          return tags ? { ...file, tags, original: cloneTags(tags), dirty: false } : file;
+          const loaded = refreshed.get(file.id);
+          return loaded ? { ...file, file: loaded.file, meta: { ...loaded.meta, path: file.meta.path }, tags: loaded.tags, original: cloneTags(loaded.tags), dirty: false, coverEdited: false } : file;
         }),
       );
       if (refreshed.size) {
@@ -1127,7 +1133,7 @@ function TagMaestro() {
   }
 
   async function saveAll() {
-    const targets = selectedFiles.length ? selectedFiles : files;
+    const targets = saveTargets;
     if (!targets.length) return;
     const canSaveDirect = targets.every((m) => {
       if (!m.sourceHandle) return false;
@@ -1142,14 +1148,14 @@ function TagMaestro() {
     try {
       if (canSaveDirect) {
         let saved = 0;
-        const savedFiles = new Map<
-          string,
-          { file: File; handle: FileSystemFileHandle; relativePath?: string }
-        >();
         for (const m of targets) {
           const originalHandle = m.sourceHandle as WritableFileHandle;
           const allowed = await ensureWritePermission(originalHandle);
           if (!allowed) throw new Error("Write permission was not granted for the selected folder");
+          const live = await originalHandle.getFile();
+          if (live.size !== m.file.size || live.lastModified !== m.file.lastModified) {
+            throw new Error(`${m.file.name} changed on disk. Reload tags before saving; completed files remain saved.`);
+          }
 
           const blob = await writeTagsToBlob(m);
           const targetName = directSaveFilename(m);
@@ -1178,62 +1184,30 @@ function TagMaestro() {
             }) as WritableFileHandle;
           }
 
-          const writable = await targetHandle.createWritable();
-          await writable.write(blob);
-          await writable.close();
+          const verified = await writeVerifiedFile(targetHandle, blob);
           if (shouldRename) {
             await m.sourceDirectoryHandle!.removeEntry(m.file.name);
           }
           const relativePath = m.libraryRelativePath
             ? replacePathFilename(m.libraryRelativePath, targetName)
             : undefined;
-          savedFiles.set(m.id, {
-            file: await targetHandle.getFile(),
-            handle: targetHandle,
-            relativePath,
-          });
+          setFiles((prev) => prev.map((f) => f.id === m.id ? {
+            ...f, file: verified, sourceHandle: targetHandle,
+            libraryRelativePath: relativePath ?? f.libraryRelativePath,
+            meta: { ...f.meta, path: replacePathFilename(f.meta.path, verified.name), size: `${(verified.size / (1024 * 1024)).toFixed(2)} MB`, modified: new Date(verified.lastModified).toLocaleString() },
+            renamedBase: undefined, dirty: false, coverEdited: false, original: cloneTags(m.tags),
+          } : f));
           saved += 1;
           setBusy(`Saving directly… ${saved}/${targets.length}`);
         }
 
-        const savedIds = new Set(targets.map((m) => m.id));
-        setFiles((prev) =>
-          prev.map((f) =>
-            savedIds.has(f.id)
-              ? {
-                  ...f,
-                  file: savedFiles.get(f.id)?.file || f.file,
-                  sourceHandle: savedFiles.get(f.id)?.handle || f.sourceHandle,
-                  libraryRelativePath:
-                    savedFiles.get(f.id)?.relativePath ?? f.libraryRelativePath,
-                  meta: {
-                    ...f.meta,
-                    path: replacePathFilename(
-                      f.meta.path,
-                      savedFiles.get(f.id)?.file.name || f.file.name,
-                    ),
-                  },
-                  renamedBase: undefined,
-                  dirty: false,
-                  original: cloneTags(f.tags),
-                }
-              : f,
-          ),
-        );
-        toast.success(`Saved ${saved} file${saved > 1 ? "s" : ""} directly`);
+        toast.success(`Saved and verified ${saved} original file${saved > 1 ? "s" : ""}`);
       } else if (targets.length === 1) {
         const m = targets[0];
         const blob = await writeTagsToBlob(m);
         const name = renamedFilename(m, pattern);
         triggerDownload(blob, name);
-        setFiles((prev) =>
-          prev.map((f) =>
-            f.id === m.id
-              ? { ...f, dirty: false, original: cloneTags(f.tags) }
-              : f,
-          ),
-        );
-        toast.info("Browser file input is read-only, so this file was exported");
+        toast.info("Downloaded an edited copy. The original is unchanged. Use Add Folder in Chrome or Edge for direct saving.");
       } else {
         const zip = new JSZip();
         for (const m of targets) {
@@ -1245,15 +1219,7 @@ function TagMaestro() {
         }
         const zipBlob = await zip.generateAsync({ type: "blob" });
         triggerDownload(zipBlob, "tagmaestro-export.zip");
-        const targetIds = new Set(targets.map((m) => m.id));
-        setFiles((prev) =>
-          prev.map((f) =>
-            targetIds.has(f.id)
-              ? { ...f, dirty: false, original: cloneTags(f.tags) }
-              : f,
-          ),
-        );
-        toast.info("These files were opened read-only, so TagMaestro exported a zip");
+        toast.info("Downloaded edited copies as a ZIP. Originals are unchanged. Use Add Folder in Chrome or Edge for direct saving.");
       }
     } catch (e: any) {
       toast.error(e?.message || "Save failed");
@@ -1358,7 +1324,7 @@ function TagMaestro() {
         onOpenChange={setCoverCleanupOpen}
         files={files}
         onTrackSaved={(row, saved, cover) => setFiles(previous => previous.map(item => item.id === row.id ? {
-          ...item, file: saved, tags: { ...item.tags, cover }, original: { ...item.original, cover },
+          ...item, file: saved, coverEdited: false, tags: { ...item.tags, cover }, original: { ...item.original, cover },
           meta: { ...item.meta, size: `${(saved.size / (1024 * 1024)).toFixed(2)} MB`, modified: new Date(saved.lastModified).toLocaleString() },
         } : item))}
       />
@@ -1444,13 +1410,13 @@ function TagMaestro() {
           title={
             !hasDirtyFiles
               ? "No unsaved changes"
-              : selectedFiles.some((f) => f.dirty)
-                ? `Save changes in selected files`
-                : "Save all unsaved changes"
+              : savesOriginals
+                ? "Write and verify changes in original music files"
+                : "Download edited copies only. Originals are unchanged; use Add Folder in Chrome/Edge for direct saving."
           }
         >
           <Save className="mr-1.5 h-4 w-4" />
-          Save all
+          {hasDirtyFiles && !savesOriginals ? "Export copies" : "Save originals"}
         </Button>
         <Button
           size="sm"
@@ -2890,32 +2856,6 @@ function TableCell({
       title={readOnly}
     >
       {readOnly}
-    </td>
-  );
-}
-
-function TdCell({
-  value,
-  onChange,
-  style,
-  dirty,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  style: React.CSSProperties;
-  dirty?: boolean;
-}) {
-  return (
-    <td style={style} className="px-1 py-px">
-      <div className="flex items-center">
-        {dirty && <span className="text-primary ml-0.5 mr-1 shrink-0 text-[10px]" title="Modified">●</span>}
-        <input
-          className="h-5 w-full truncate rounded-none bg-transparent px-1.5 py-0 text-[11px] leading-none text-slate-950 outline-none focus:bg-white focus:ring-1 focus:ring-primary dark:text-foreground dark:focus:bg-background"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          onClick={(e) => e.stopPropagation()}
-        />
-      </div>
     </td>
   );
 }
