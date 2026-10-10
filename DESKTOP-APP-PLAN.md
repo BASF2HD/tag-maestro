@@ -1,6 +1,6 @@
 # Tag Maestro standalone desktop plan
 
-Status: Apple Silicon `.app`, `.dmg` and app ZIP 1.0.1 builds exist locally. Installer checksum and packaged origin/sandbox, metadata, artwork, playback/seek, verified deletion and restart tests pass. TagLib's dynamic bindings are enabled following explicit user approval; remote access remains blocked. See [DESKTOP-APP.md](DESKTOP-APP.md). Windows packaging and native-runner tests are configured.
+Status: Apple Silicon `.app`, `.dmg` and app ZIP 1.0.1 builds exist locally. Mac and Windows x64 Setup/Portable EXE native-runner builds and packaged origin/sandbox, metadata, artwork, playback/seek, verified deletion and restart tests pass. TagLib's dynamic bindings are enabled following explicit user approval; remote access remains blocked. See [DESKTOP-APP.md](DESKTOP-APP.md).
 
 ## Recommended approach
 

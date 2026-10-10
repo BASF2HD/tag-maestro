@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 import { BulkFieldEditDialog } from "../src/components/BulkFieldEditDialog";
 import { emptyTags, emptyMeta, type Mp3File } from "../src/lib/mp3";
 import "../src/styles.css";
+document.documentElement.classList.add("dark");
 const files: Mp3File[] = ["One", "Two"].map((title, index) => ({
   id: String(index),
   file: new File([], `Old ${title}.wav`),

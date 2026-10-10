@@ -2,7 +2,7 @@
 
 ## Current status
 
-An offline Electron desktop bundle, Apple Silicon Mac app, DMG installer and app ZIP have been built locally. No development server, separate browser or Node installation is required by the packaged app. Windows x64 NSIS installer and portable EXE targets are configured, but have not been built or tested yet.
+An offline Electron desktop bundle, Apple Silicon Mac app, DMG installer and app ZIP have been built locally. Windows x64 NSIS installer and portable EXE builds also completed successfully on a native Windows runner. No development server, separate browser or Node installation is required by the packaged app.
 
 The user approved `unsafe-eval` for the bundled TagLib/Emscripten JavaScript bindings. The Mac 1.0.1 packaged integration test now passes metadata save/read-back, embedded artwork replacement/removal, audio playback/seek, verified deletion, scan-time duration, and restart persistence. Node remains disabled; renderer sandboxing, context isolation and blocked remote/network access remain enabled.
 
@@ -13,6 +13,8 @@ Local outputs:
 - `dist-package/Tag Maestro-1.0.1-mac-arm64.zip`
 
 The DMG checksum has been verified with `hdiutil verify`. These are unsigned local test builds; public distribution needs Apple signing/notarization and separate Windows signing. No installers have been published.
+
+Both native build jobs and packaged tests passed in [GitHub Actions run 38039632681](https://github.com/BASF2HD/tag-maestro/actions/runs/38039632681), built from commit `c2b96e68ce935d281f82b9de1ccf4c1e40fd0d30`. The Actions artifacts contain the Mac DMG/app ZIP and Windows Setup/Portable EXEs. These are build artifacts, not a public GitHub Release.
 
 ## Build and test
 
@@ -38,7 +40,7 @@ The manual `Desktop test builds` GitHub workflow builds Mac and Windows targets,
 - Existing verified-save and exact-file deletion checks are reused. Single and bulk delete remain immediate, permanent operations as requested; they are not Trash operations.
 - All UI, TagLib/WASM and artwork assets are packaged locally. Desktop and existing web build entry points remain separate.
 
-Verified locally: renderer TypeScript/web build, app-origin/path-confinement tests, table preferences, cover-batch settings, embedded-cover/verified-save regression tests, scan-time length and front-cover preference, and the actual packaged Mac app's isolated metadata/artwork/playback/seek/deletion/restart tests. DMG integrity also passes. Tests do not modify user music. Interactive folder access and further format testing should be performed on disposable copies before editing originals. Windows native tests run in the build workflow.
+Verified locally: renderer TypeScript/web build, app-origin/path-confinement tests, table preferences, cover-batch settings, embedded-cover/verified-save regression tests, scan-time length and front-cover preference, and the actual packaged Mac app's isolated metadata/artwork/playback/seek/deletion/restart tests. The same packaged tests also passed on native Mac and Windows GitHub runners. DMG integrity passes. Tests do not modify user music. Interactive folder access and further format testing should be performed on disposable copies before editing originals.
 
 ## Library editing changes in 1.0.1
 
