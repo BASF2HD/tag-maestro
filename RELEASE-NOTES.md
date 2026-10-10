@@ -1,4 +1,6 @@
-# Tag Maestro 1.0.6
+# Tag Maestro 1.0.7
+
+Clean-checkout icon generation now creates its output directory automatically.
 
 Manage music tags, embedded cover artwork and library names locally.
 

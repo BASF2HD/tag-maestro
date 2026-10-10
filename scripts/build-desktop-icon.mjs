@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 const require = createRequire(import.meta.url);
 const sharp = require("sharp");
+await fs.mkdir("desktop/assets", { recursive: true });
 const svg = await fs.readFile("public/brand/tag-maestro-1024.png");
 await sharp(svg).resize(1024, 1024).png().toFile("desktop/assets/icon.png");
 if (process.platform === "darwin") {

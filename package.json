@@ -1,6 +1,6 @@
 {
   "name": "tag-maestro",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "description": "Local music tags, cover artwork and library management",
   "author": "Tag Maestro",
   "main": "desktop/main.cjs",
