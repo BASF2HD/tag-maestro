@@ -26,6 +26,7 @@ import type { Mp3File, Mp3Tags } from "@/lib/mp3";
 
 export type BulkFieldKey =
   | "filename"
+  | "folder"
   | "title"
   | "artist"
   | "album"
@@ -41,6 +42,7 @@ export type BulkFieldKey =
 
 const FIELD_OPTIONS: { key: BulkFieldKey; label: string }[] = [
   { key: "filename", label: "Filename" },
+  { key: "folder", label: "Folder name" },
   { key: "title", label: "Title" },
   { key: "artist", label: "Artist" },
   { key: "album", label: "Album" },
@@ -64,6 +66,7 @@ function filenameBase(name: string): string {
 
 function getFieldValue(m: Mp3File, field: BulkFieldKey): string {
   if (field === "filename") return m.renamedBase ?? filenameBase(m.file.name);
+  if (field === "folder") return m.editedFolderName || m.folderName;
   return (m.tags[field as keyof Mp3Tags] as string) || "";
 }
 
@@ -100,7 +103,9 @@ export function BulkFieldEditDialog({
   const [removeLength, setRemoveLength] = useState("0");
 
   // case
-  const [caseType, setCaseType] = useState<"upper" | "lower" | "title" | "sentence" | "none">("none");
+  const [caseType, setCaseType] = useState<"upper" | "lower" | "title" | "sentence" | "none">(
+    "none",
+  );
 
   // trim
   const [trimSpaces, setTrimSpaces] = useState(true);
@@ -233,12 +238,16 @@ export function BulkFieldEditDialog({
           </div>
         </DialogHeader>
 
-        <div className="p-4 border-b border-border flex items-center gap-3 bg-sidebar/10">
-          <Label className="text-xs text-muted-foreground">Target field</Label>
+        <div className="shrink-0 p-4 border-b border-border flex flex-wrap items-center gap-3 bg-sidebar/10">
+          <Label htmlFor="bulk-edit-target" className="text-xs font-medium text-foreground">
+            Target field
+          </Label>
           <select
+            id="bulk-edit-target"
+            aria-label="Target field"
             value={field}
             onChange={(e) => setField(e.currentTarget.value as BulkFieldKey)}
-            className="h-8 w-48 rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none focus:ring-1 focus:ring-primary"
+            className="h-8 min-w-48 flex-1 rounded-md border border-input [background:Canvas] [color:CanvasText] px-2 text-xs outline-none focus:ring-1 focus:ring-primary"
           >
             {FIELD_OPTIONS.map((o) => (
               <option key={o.key} value={o.key}>
@@ -246,6 +255,11 @@ export function BulkFieldEditDialog({
               </option>
             ))}
           </select>
+          {field === "folder" && (
+            <p className="w-full text-xs text-muted-foreground">
+              Folder edits affect exported folder names. Original folders are not renamed on disk.
+            </p>
+          )}
           <div className="ml-auto flex items-center gap-2">
             <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
               <input
@@ -262,21 +276,40 @@ export function BulkFieldEditDialog({
         </div>
 
         <div className="border-b border-border bg-sidebar/10">
-          <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as OperationType)} className="w-full">
+          <Tabs
+            value={activeTab}
+            onValueChange={(v) => setActiveTab(v as OperationType)}
+            className="w-full"
+          >
             <TabsList className="w-full justify-start rounded-none h-10 bg-transparent border-b-0 px-2 gap-1">
-              <TabsTrigger value="find-replace" className="text-xs h-8 data-[state=active]:bg-background/80">
+              <TabsTrigger
+                value="find-replace"
+                className="text-xs h-8 data-[state=active]:bg-background/80"
+              >
                 <Search className="h-3 w-3 mr-1.5" /> Find & Replace
               </TabsTrigger>
-              <TabsTrigger value="prefix-suffix" className="text-xs h-8 data-[state=active]:bg-background/80">
+              <TabsTrigger
+                value="prefix-suffix"
+                className="text-xs h-8 data-[state=active]:bg-background/80"
+              >
                 <Plus className="h-3 w-3 mr-1.5" /> Prefix/Suffix
               </TabsTrigger>
-              <TabsTrigger value="insert-remove" className="text-xs h-8 data-[state=active]:bg-background/80">
+              <TabsTrigger
+                value="insert-remove"
+                className="text-xs h-8 data-[state=active]:bg-background/80"
+              >
                 <Scissors className="h-3 w-3 mr-1.5" /> Insert/Remove
               </TabsTrigger>
-              <TabsTrigger value="case" className="text-xs h-8 data-[state=active]:bg-background/80">
+              <TabsTrigger
+                value="case"
+                className="text-xs h-8 data-[state=active]:bg-background/80"
+              >
                 <CaseSensitive className="h-3 w-3 mr-1.5" /> Case
               </TabsTrigger>
-              <TabsTrigger value="trim" className="text-xs h-8 data-[state=active]:bg-background/80">
+              <TabsTrigger
+                value="trim"
+                className="text-xs h-8 data-[state=active]:bg-background/80"
+              >
                 <Sparkles className="h-3 w-3 mr-1.5" /> Trim/Clean
               </TabsTrigger>
             </TabsList>
@@ -285,20 +318,40 @@ export function BulkFieldEditDialog({
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1">
                     <Label className="text-[11px] text-muted-foreground">Find Text</Label>
-                    <Input value={findText} onChange={(e) => setFindText(e.target.value)} className="h-8 text-xs" placeholder="e.g. feat" />
+                    <Input
+                      value={findText}
+                      onChange={(e) => setFindText(e.target.value)}
+                      className="h-8 text-xs"
+                      placeholder="e.g. feat"
+                    />
                   </div>
                   <div className="space-y-1">
                     <Label className="text-[11px] text-muted-foreground">Replace With</Label>
-                    <Input value={replaceText} onChange={(e) => setReplaceText(e.target.value)} className="h-8 text-xs" placeholder="e.g. ft." />
+                    <Input
+                      value={replaceText}
+                      onChange={(e) => setReplaceText(e.target.value)}
+                      className="h-8 text-xs"
+                      placeholder="e.g. ft."
+                    />
                   </div>
                 </div>
                 <div className="flex gap-4 items-center pt-1">
                   <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
-                    <input type="checkbox" checked={useRegex} onChange={(e) => setUseRegex(e.currentTarget.checked)} className="h-3.5 w-3.5 accent-primary" />
+                    <input
+                      type="checkbox"
+                      checked={useRegex}
+                      onChange={(e) => setUseRegex(e.currentTarget.checked)}
+                      className="h-3.5 w-3.5 accent-primary"
+                    />
                     <span>Use Regular Expressions</span>
                   </label>
                   <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
-                    <input type="checkbox" checked={caseSensitive} onChange={(e) => setCaseSensitive(e.currentTarget.checked)} className="h-3.5 w-3.5 accent-primary" />
+                    <input
+                      type="checkbox"
+                      checked={caseSensitive}
+                      onChange={(e) => setCaseSensitive(e.currentTarget.checked)}
+                      className="h-3.5 w-3.5 accent-primary"
+                    />
                     <span>Case Sensitive</span>
                   </label>
                 </div>
@@ -308,11 +361,19 @@ export function BulkFieldEditDialog({
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1">
                     <Label className="text-[11px] text-muted-foreground">Add Prefix</Label>
-                    <Input value={prefix} onChange={(e) => setPrefix(e.target.value)} className="h-8 text-xs" />
+                    <Input
+                      value={prefix}
+                      onChange={(e) => setPrefix(e.target.value)}
+                      className="h-8 text-xs"
+                    />
                   </div>
                   <div className="space-y-1">
                     <Label className="text-[11px] text-muted-foreground">Add Suffix</Label>
-                    <Input value={suffix} onChange={(e) => setSuffix(e.target.value)} className="h-8 text-xs" />
+                    <Input
+                      value={suffix}
+                      onChange={(e) => setSuffix(e.target.value)}
+                      className="h-8 text-xs"
+                    />
                   </div>
                 </div>
               </TabsContent>
@@ -321,27 +382,59 @@ export function BulkFieldEditDialog({
                 <div className="grid grid-cols-2 gap-3 border-b border-border pb-3">
                   <div className="space-y-1">
                     <Label className="text-[11px] text-muted-foreground">Insert Text</Label>
-                    <Input value={insertText} onChange={(e) => setInsertText(e.target.value)} className="h-8 text-xs" />
+                    <Input
+                      value={insertText}
+                      onChange={(e) => setInsertText(e.target.value)}
+                      className="h-8 text-xs"
+                    />
                   </div>
                   <div className="space-y-1">
-                    <Label className="text-[11px] text-muted-foreground">At Position (negative = from end)</Label>
-                    <Input type="number" value={insertPos} onChange={(e) => setInsertPos(e.target.value)} className="h-8 text-xs" />
+                    <Label className="text-[11px] text-muted-foreground">
+                      At Position (negative = from end)
+                    </Label>
+                    <Input
+                      type="number"
+                      value={insertPos}
+                      onChange={(e) => setInsertPos(e.target.value)}
+                      className="h-8 text-xs"
+                    />
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1">
-                    <Label className="text-[11px] text-muted-foreground">Remove from Position</Label>
-                    <Input type="number" value={removeStart} onChange={(e) => setRemoveStart(e.target.value)} className="h-8 text-xs" />
+                    <Label className="text-[11px] text-muted-foreground">
+                      Remove from Position
+                    </Label>
+                    <Input
+                      type="number"
+                      value={removeStart}
+                      onChange={(e) => setRemoveStart(e.target.value)}
+                      className="h-8 text-xs"
+                    />
                   </div>
                   <div className="space-y-1">
-                    <Label className="text-[11px] text-muted-foreground">Number of Characters</Label>
-                    <Input type="number" min="0" value={removeLength} onChange={(e) => setRemoveLength(e.target.value)} className="h-8 text-xs" />
+                    <Label className="text-[11px] text-muted-foreground">
+                      Number of Characters
+                    </Label>
+                    <Input
+                      type="number"
+                      min="0"
+                      value={removeLength}
+                      onChange={(e) => setRemoveLength(e.target.value)}
+                      className="h-8 text-xs"
+                    />
                   </div>
                 </div>
               </TabsContent>
 
               <TabsContent value="case" className="mt-0">
-                <RadioGroup value={caseType} onValueChange={(v) => setCaseType(v as "upper" | "lower" | "title" | "sentence" | "none")} className="grid grid-cols-2 gap-2">
+                <RadioGroup
+                  value={caseType}
+                  onValueChange={(v) =>
+                    setCaseType(v as "upper" | "lower" | "title" | "sentence" | "none")
+                  }
+                  className="grid grid-cols-2 gap-2"
+                >
                   {[
                     { v: "none", l: "No Case Change" },
                     { v: "upper", l: "UPPERCASE" },
@@ -349,7 +442,10 @@ export function BulkFieldEditDialog({
                     { v: "title", l: "Title Case" },
                     { v: "sentence", l: "Sentence case" },
                   ].map((o) => (
-                    <label key={o.v} className="flex items-center gap-2 p-2 rounded border border-border bg-card hover:bg-accent/40 cursor-pointer">
+                    <label
+                      key={o.v}
+                      className="flex items-center gap-2 p-2 rounded border border-border bg-card hover:bg-accent/40 cursor-pointer"
+                    >
                       <RadioGroupItem value={o.v} />
                       <span className="text-xs">{o.l}</span>
                     </label>
@@ -359,24 +455,45 @@ export function BulkFieldEditDialog({
 
               <TabsContent value="trim" className="mt-0 space-y-2">
                 <label className="flex items-center gap-2 p-2 rounded border border-border bg-card hover:bg-accent/40 cursor-pointer">
-                  <input type="checkbox" checked={trimSpaces} onChange={(e) => setTrimSpaces(e.currentTarget.checked)} className="h-3.5 w-3.5 accent-primary" />
+                  <input
+                    type="checkbox"
+                    checked={trimSpaces}
+                    onChange={(e) => setTrimSpaces(e.currentTarget.checked)}
+                    className="h-3.5 w-3.5 accent-primary"
+                  />
                   <div className="text-left">
                     <p className="text-xs font-medium">Trim Whitespace</p>
-                    <p className="text-[10px] text-muted-foreground">Remove leading and trailing spaces.</p>
+                    <p className="text-[10px] text-muted-foreground">
+                      Remove leading and trailing spaces.
+                    </p>
                   </div>
                 </label>
                 <label className="flex items-center gap-2 p-2 rounded border border-border bg-card hover:bg-accent/40 cursor-pointer">
-                  <input type="checkbox" checked={collapseSpaces} onChange={(e) => setCollapseSpaces(e.currentTarget.checked)} className="h-3.5 w-3.5 accent-primary" />
+                  <input
+                    type="checkbox"
+                    checked={collapseSpaces}
+                    onChange={(e) => setCollapseSpaces(e.currentTarget.checked)}
+                    className="h-3.5 w-3.5 accent-primary"
+                  />
                   <div className="text-left">
                     <p className="text-xs font-medium">Collapse Multiple Spaces</p>
-                    <p className="text-[10px] text-muted-foreground">Replace runs of whitespace with a single space.</p>
+                    <p className="text-[10px] text-muted-foreground">
+                      Replace runs of whitespace with a single space.
+                    </p>
                   </div>
                 </label>
                 <label className="flex items-center gap-2 p-2 rounded border border-border bg-card hover:bg-accent/40 cursor-pointer">
-                  <input type="checkbox" checked={removeSpecial} onChange={(e) => setRemoveSpecial(e.currentTarget.checked)} className="h-3.5 w-3.5 accent-primary" />
+                  <input
+                    type="checkbox"
+                    checked={removeSpecial}
+                    onChange={(e) => setRemoveSpecial(e.currentTarget.checked)}
+                    className="h-3.5 w-3.5 accent-primary"
+                  />
                   <div className="text-left">
                     <p className="text-xs font-medium">Remove Invalid Path Characters</p>
-                    <p className="text-[10px] text-muted-foreground">Strip \ / : * ? &quot; &lt; &gt; |</p>
+                    <p className="text-[10px] text-muted-foreground">
+                      Strip \ / : * ? &quot; &lt; &gt; |
+                    </p>
                   </div>
                 </label>
               </TabsContent>
@@ -386,27 +503,47 @@ export function BulkFieldEditDialog({
 
         <div className="flex-1 flex flex-col min-h-0 bg-sidebar/5">
           <div className="px-4 py-2 border-b border-border flex items-center justify-between bg-sidebar/20">
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Live Preview</span>
-            <span className="text-[10px] text-muted-foreground">{changes.size} of {selectedIds.size} will change</span>
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Live Preview
+            </span>
+            <span className="text-[10px] text-muted-foreground">
+              {changes.size} of {selectedIds.size} will change
+            </span>
           </div>
           <ScrollArea className="flex-1">
             <div className="p-4">
               {changes.size === 0 ? (
-                <div className="text-center py-8 text-xs text-muted-foreground">No changes for the current rules.</div>
+                <div className="text-center py-8 text-xs text-muted-foreground">
+                  No changes for the current rules.
+                </div>
               ) : (
                 <div className="space-y-1">
                   {(() => {
-                    const firstChange = changes.entries().next().value as [string, string] | undefined;
+                    const firstChange = changes.entries().next().value as
+                      [string, string] | undefined;
                     if (!firstChange) return null;
                     const [id, next] = firstChange;
                     const f = files.find((x) => x.id === id);
                     if (!f) return null;
                     const cur = getFieldValue(f, field);
                     return (
-                      <div key={id} className="flex items-center gap-3 py-1.5 border-b border-border/40 text-xs">
-                        <span className="flex-1 truncate font-mono text-muted-foreground" title={cur}>{cur || <span className="italic">&lt;empty&gt;</span>}</span>
+                      <div
+                        key={id}
+                        className="flex items-center gap-3 py-1.5 border-b border-border/40 text-xs"
+                      >
+                        <span
+                          className="flex-1 truncate font-mono text-muted-foreground"
+                          title={cur}
+                        >
+                          {cur || <span className="italic">&lt;empty&gt;</span>}
+                        </span>
                         <ArrowRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                        <span className="flex-1 truncate font-mono text-primary font-medium" title={next}>{next || <span className="italic">&lt;empty&gt;</span>}</span>
+                        <span
+                          className="flex-1 truncate font-mono text-primary font-medium"
+                          title={next}
+                        >
+                          {next || <span className="italic">&lt;empty&gt;</span>}
+                        </span>
                       </div>
                     );
                   })()}
@@ -424,7 +561,10 @@ export function BulkFieldEditDialog({
         <DialogFooter className="p-4 border-t border-border flex items-center justify-between">
           <div className="text-xs text-muted-foreground flex items-center gap-1.5">
             {changes.size > 0 ? (
-              <Badge variant="default" className="bg-primary/20 text-primary hover:bg-primary/30 border-0 h-5">
+              <Badge
+                variant="default"
+                className="bg-primary/20 text-primary hover:bg-primary/30 border-0 h-5"
+              >
                 {changes.size} file{changes.size > 1 ? "s" : ""} will be updated
               </Badge>
             ) : (

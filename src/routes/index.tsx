@@ -5,7 +5,7 @@ import { Toaster, toast } from "@/components/ui/sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+import { TagFieldCombo, KEEP_TAG_VALUE as MULTI } from "@/components/TagFieldCombo";
 import { Separator } from "@/components/ui/separator";
 import {
   Music4,
@@ -43,7 +43,6 @@ import {
   emptyTags,
   SUPPORTED_EXTS,
   SUPPORTED_ACCEPT,
-  IMAGE_EXTS,
   extractFolderName,
   type Mp3File,
   type Mp3Tags,
@@ -80,8 +79,6 @@ import {
 export const Route = createFileRoute("/")({
   component: TagMaestro,
 });
-
-const MULTI = "<keep>";
 
 type TagKey = keyof Omit<Mp3Tags, "cover">;
 type MetaKey = keyof FileMeta;
@@ -299,7 +296,7 @@ function cloneTags(t: Mp3Tags): Mp3Tags {
   return structuredClone({ ...t, cover: t.cover ? { ...t.cover } : undefined });
 }
 
-function TagMaestro() {
+export function TagMaestro() {
   const [theme, setTheme] = useState<"light" | "dark">(getSavedTheme);
   const [themeReady, setThemeReady] = useState(false);
 
@@ -379,39 +376,43 @@ function TagMaestro() {
   const selectedDirty = selectedFiles.filter((file) => file.dirty);
   const saveTargets = selectedDirty.length ? selectedDirty : files.filter((file) => file.dirty);
   const savesOriginals = saveTargets.length > 0 && saveTargets.every((file) =>
-    file.sourceHandle && (directSaveFilename(file) === file.file.name || file.sourceDirectoryHandle),
+    file.sourceHandle && file.editedFolderName === file.folderName &&
+      (directSaveFilename(file) === file.file.name || file.sourceDirectoryHandle),
   );
 
+  const firstSelectedFile = selectedFiles[0];
   useEffect(() => {
-    const first = selectedFiles[0];
+    const first = firstSelectedFile;
     if (!first || first.coverEdited || first.tags.cover || coverProbeIds.current.has(first.id)) return;
-
     coverProbeIds.current.add(first.id);
     let cancelled = false;
+    let settled = false;
     void readMp3(
-      first.file,
-      first.meta.path || first.file.name,
-      true,
-      true,
-      first.sourceHandle,
-      first.sourceDirectoryHandle,
+      first.file, first.meta.path || first.file.name, true, true,
+      first.sourceHandle, first.sourceDirectoryHandle,
     ).then((loaded) => {
+      settled = true;
+      if (cancelled) {
+        coverProbeIds.current.delete(first.id);
+        return;
+      }
       const cover = loaded.tags.cover;
-      if (cancelled || !cover) return;
-      setFiles((prev) =>
-        prev.map((f) => {
-          const sameTrack = f.id === first.id;
-          return !f.coverEdited && !f.tags.cover && sameTrack
-            ? { ...f, tags: { ...f.tags, cover }, original: { ...f.original, cover } }
-            : f;
-        }),
-      );
+      if (!cover) return;
+      setFiles((prev) => prev.map((f) =>
+        f.id === first.id && f.file === first.file && !f.coverEdited && !f.tags.cover
+          ? { ...f, tags: { ...f.tags, cover }, original: { ...f.original, cover } }
+          : f,
+      ));
+    }).catch(() => {
+      settled = true;
+      coverProbeIds.current.delete(first.id);
+      if (!cancelled) toast.error("Could not read the embedded artwork. Reload tags to retry.");
     });
-
     return () => {
       cancelled = true;
+      if (!settled) coverProbeIds.current.delete(first.id);
     };
-  }, [selectedFiles]);
+  }, [firstSelectedFile?.id, firstSelectedFile?.file, firstSelectedFile?.coverEdited, firstSelectedFile?.tags.cover]);
 
   const filtered = useMemo(() => {
     const q = filter.toLowerCase();
@@ -559,7 +560,6 @@ function TagMaestro() {
     await pauseForPaint();
 
     const audioFiles: FolderFileEntry[] = [];
-    const coverByFolder = new Map<string, File>();
 
     // Scan once to avoid duplicating very large folder selections in memory.
     for (let i = 0; i < pickedCount; i++) {
@@ -568,14 +568,6 @@ function TagMaestro() {
       const n = f.name.toLowerCase();
       if (SUPPORTED_EXTS.some((ext) => n.endsWith(ext))) {
         audioFiles.push(entry);
-      } else if (IMAGE_EXTS.some((ext) => n.endsWith(ext))) {
-        const rp = entry.relativePath;
-        const parts = rp.replace(/\\/g, "/").split("/").filter(Boolean);
-        const folderIdx = parts.findIndex((p) => /^covers?$/i.test(p));
-        if (folderIdx >= 1) {
-          const albumPath = parts.slice(0, folderIdx).join("/");
-          if (!coverByFolder.has(albumPath)) coverByFolder.set(albumPath, f);
-        }
       }
 
       if (i > 0 && i % 1000 === 0) {
@@ -598,7 +590,6 @@ function TagMaestro() {
     const BATCH = 25;
     const total = audioFiles.length;
     let loadedCount = 0;
-    const coverCache = new Map<string, Mp3Tags["cover"]>();
     setBusy(`Reading files… 0/${total}`);
     setImportProgress({
       title: "Reading audio tags",
@@ -632,33 +623,6 @@ function TagMaestro() {
           })),
         );
 
-        // Auto-assign cover art from /cover/ subfolders
-        for (const m of loaded) {
-          if (!m.tags.cover && m.folderPath) {
-            // Check if any parent path of this file's folder has a cover
-            const coverImg = coverByFolder.get(m.folderPath);
-            if (coverImg) {
-              try {
-                let cover = coverCache.get(m.folderPath);
-                if (!cover) {
-                  const reader = new FileReader();
-                  const dataUrl = await new Promise<string>((resolve, reject) => {
-                    reader.onload = () => resolve(String(reader.result));
-                    reader.onerror = reject;
-                    reader.readAsDataURL(coverImg);
-                  });
-                  const mime = coverImg.type || "image/jpeg";
-                  const bin = atob(dataUrl.split(",")[1]);
-                  const data = new Uint8Array(bin.length);
-                  for (let j = 0; j < bin.length; j++) data[j] = bin.charCodeAt(j);
-                  cover = { data, mime, dataUrl };
-                  coverCache.set(m.folderPath, cover);
-                }
-                m.tags.cover = cover;
-              } catch { /* skip cover on error */ }
-            }
-          }
-        }
 
         setFiles((prev) => {
           if (!options.sourceId) return [...prev, ...loaded];
@@ -961,6 +925,9 @@ function TagMaestro() {
         if (field === "filename") {
           return { ...f, renamedBase: next, dirty: true };
         }
+        if (field === "folder") {
+          return { ...f, editedFolderName: next, dirty: true };
+        }
         return { ...f, tags: { ...f.tags, [field]: next }, dirty: true };
       }),
     );
@@ -1029,6 +996,11 @@ function TagMaestro() {
   function applyToSelected(patch: Partial<Mp3Tags>) {
     if (!selected.size) return;
     const editsCover = Object.prototype.hasOwnProperty.call(patch, "cover");
+    // Choosing <keep> is a no-op, not an edit or an unsaved change.
+    if (
+      !editsCover &&
+      !Object.values(patch).some((value) => value !== undefined && value !== MULTI)
+    ) return;
     if (editsCover) selected.forEach((id) => coverProbeIds.current.add(id));
     setFiles((prev) =>
       prev.map((f) => {
@@ -1203,6 +1175,7 @@ function TagMaestro() {
     const targets = saveTargets;
     if (!targets.length) return;
     const canSaveDirect = targets.every((m) => {
+      if (m.editedFolderName !== m.folderName) return false;
       if (!m.sourceHandle) return false;
       const targetName = directSaveFilename(m);
       return targetName === m.file.name || Boolean(m.sourceDirectoryHandle);
@@ -1269,7 +1242,7 @@ function TagMaestro() {
         }
 
         toast.success(`Saved and verified ${saved} original file${saved > 1 ? "s" : ""}`);
-      } else if (targets.length === 1) {
+      } else if (targets.length === 1 && targets[0].editedFolderName === targets[0].folderName) {
         const m = targets[0];
         const blob = await writeTagsToBlob(m);
         const name = renamedFilename(m, pattern);
@@ -1498,8 +1471,8 @@ function TagMaestro() {
           variant="outline"
           disabled={!files.length || Boolean(busy || importProgress)}
           onClick={() => setCoverCleanupOpen(true)}
-          title="Codex-assisted cover cleanup"
-          aria-label="Codex-assisted cover cleanup"
+          title="Codex cover cleanup"
+          aria-label="Codex cover cleanup"
         >
           <ImageIcon className="h-4 w-4" />
           <span className="ml-1.5 hidden xl:inline">Cover cleanup</span>
@@ -1509,7 +1482,6 @@ function TagMaestro() {
           icon={Wand2}
           disabled={!files.length}
           items={[
-            { label: "Codex-assisted cover cleanup", onSelect: () => setCoverCleanupOpen(true) },
             { label: "Rename folders", onSelect: () => setFolderRenameOpen(true) },
             { label: "Bulk edit", onSelect: () => setBulkEditOpen(true) },
             { label: "Convert tags", onSelect: () => setConverterOpen(true) },
@@ -3152,9 +3124,10 @@ function EditorPanel({
           >
             {tags.cover?.dataUrl ? (
               <img
-                src={tags.cover.dataUrl}
-                alt="Cover"
-                className="h-full w-full object-cover"
+src={tags.cover.dataUrl}
+                alt="Embedded cover art"
+                title="Cover art embedded in the selected song (or your unsaved artwork edit)"
+                className="h-full w-full object-contain"
               />
             ) : (
               <div className="text-center text-xs text-muted-foreground">
@@ -3200,135 +3173,20 @@ function EditorPanel({
       )}
 
       <div className="flex-1 min-h-0 overflow-auto px-2.5 pb-2.5 space-y-1">
-        {FIELDS.map((f) =>
-          f.key === "comment" ? (
-            <div key={f.key} className="space-y-px">
-              <Label className="text-[11px] leading-none text-foreground">{f.label}</Label>
-              <Textarea
-                disabled={count === 0}
-                value={tags.comment === MULTI ? "" : tags.comment}
-                placeholder={tags.comment === MULTI ? "<multiple values>" : ""}
-                onChange={(e) => onChange("comment", e.target.value)}
-                className="min-h-[32px] rounded-[1px] border-border bg-white px-1.5 py-0.5 text-[11px] leading-4 text-foreground shadow-none focus-visible:bg-white focus-visible:ring-0 focus-visible:border-primary dark:bg-background dark:focus-visible:bg-background"
-              />
-            </div>
-          ) : (
-            <div key={f.key} className="space-y-px">
-              <Label className="text-[11px] leading-none text-foreground">{f.label}</Label>
-              <TagFieldCombo
-                disabled={count === 0}
-                value={tags[f.key]}
-                options={fieldOptions[f.key] || []}
-                onChange={(v) => onChange(f.key, v)}
-              />
-            </div>
-          ),
-        )}
+        {FIELDS.map((f) => (
+          <div key={f.key} className="space-y-px">
+            <Label className="text-[11px] leading-none text-foreground">{f.label}</Label>
+            <TagFieldCombo
+              disabled={count === 0}
+              value={tags[f.key]}
+              options={fieldOptions[f.key] || []}
+              onChange={(v) => onChange(f.key, v)}
+              multiline={f.key === "comment"}
+              fieldLabel={f.label}
+            />
+          </div>
+        ))}
       </div>
-    </div>
-  );
-}
-
-function TagFieldCombo({
-  value,
-  options,
-  onChange,
-  disabled,
-}: {
-  value: string;
-  options: string[];
-  onChange: (v: string) => void;
-  disabled?: boolean;
-}) {
-  const [open, setOpen] = useState(false);
-  const comboRef = useRef<HTMLDivElement>(null);
-  const isMulti = value === MULTI;
-
-  useEffect(() => {
-    if (!open) return;
-    function onPointerDown(event: PointerEvent) {
-      if (!comboRef.current?.contains(event.target as Node)) {
-        setOpen(false);
-      }
-    }
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") setOpen(false);
-    }
-    document.addEventListener("pointerdown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("pointerdown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [open]);
-
-  return (
-    <div ref={comboRef} className="relative">
-      <Input
-        disabled={disabled}
-        value={isMulti ? "" : value}
-        placeholder={isMulti ? "<keep>" : ""}
-        onChange={(e) => onChange(e.target.value)}
-        className="h-[22px] rounded-[1px] border-border bg-white px-1.5 py-0 pr-6 text-[11px] leading-none text-foreground shadow-none focus-visible:bg-white focus-visible:ring-0 focus-visible:border-primary dark:bg-background dark:focus-visible:bg-background"
-      />
-      <button
-        type="button"
-        disabled={disabled}
-        className="absolute right-0.5 top-1/2 grid h-[18px] w-5 -translate-y-1/2 place-items-center rounded-sm text-foreground hover:bg-accent hover:text-foreground disabled:opacity-100"
-        aria-label="Choose value"
-        aria-expanded={open}
-        onClick={(e) => {
-          e.stopPropagation();
-          setOpen((value) => !value);
-        }}
-      >
-        <ChevronDown className="h-3 w-3" />
-      </button>
-      {open && (
-        <div
-          role="listbox"
-          className="absolute left-0 right-0 top-full z-50 mt-px max-h-40 w-auto overflow-auto rounded-none border border-[#c8c8c8] p-0 text-[10.5px] leading-none shadow-none [background:Canvas] [color:CanvasText]"
-        >
-          <button
-            type="button"
-            className="block h-[18px] w-full px-1.5 py-0 text-left text-[10.5px] italic leading-[18px] [color:GrayText] hover:[background:Highlight] hover:[color:HighlightText] focus:[background:Highlight] focus:[color:HighlightText] focus:outline-none"
-            onClick={() => {
-              onChange(MULTI);
-              setOpen(false);
-            }}
-          >
-            &lt;keep&gt;
-          </button>
-          <button
-            type="button"
-            className="block h-[18px] w-full px-1.5 py-0 text-left text-[10.5px] italic leading-[18px] [color:GrayText] hover:[background:Highlight] hover:[color:HighlightText] focus:[background:Highlight] focus:[color:HighlightText] focus:outline-none"
-            onClick={() => {
-              onChange("");
-              setOpen(false);
-            }}
-          >
-            &lt;blank&gt;
-          </button>
-          {options.length > 0 && <div className="my-px border-t border-[#d8d8d8]" />}
-          {options.map((opt) => (
-            <button
-              key={opt}
-              type="button"
-              className="block h-[18px] w-full truncate px-1.5 py-0 text-left text-[10.5px] leading-[18px] hover:[background:Highlight] hover:[color:HighlightText] focus:[background:Highlight] focus:[color:HighlightText] focus:outline-none"
-              title={opt}
-              onClick={() => {
-                onChange(opt);
-                setOpen(false);
-              }}
-            >
-              {opt}
-            </button>
-          ))}
-          {options.length === 0 && (
-            <div className="h-[18px] px-1.5 py-0 text-[10.5px] italic leading-[18px] [color:GrayText]">No values in selection</div>
-          )}
-        </div>
-      )}
     </div>
   );
 }

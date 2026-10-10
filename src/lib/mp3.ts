@@ -59,6 +59,29 @@ export interface Mp3File {
 
 let tagLibPromise: Promise<TagLib> | null = null;
 let tagReadQueue: Promise<void> = Promise.resolve();
+const technicalMetadata = new WeakMap<File, Partial<FileMeta>>();
+
+function rememberAudioProperties(file: File, audio: AudioFile) {
+  const properties = audio.audioProperties();
+  if (!properties) return;
+  const duration =
+    properties.durationMs !== undefined ? properties.durationMs / 1000 : properties.duration;
+  technicalMetadata.set(file, {
+    length: formatDuration(duration),
+    bitrate: properties.bitrate > 0 ? `${properties.bitrate} kbps` : "",
+    frequency: properties.sampleRate > 0 ? `${properties.sampleRate} Hz` : "",
+    mode:
+      properties.channels === 1
+        ? "Mono"
+        : properties.channels === 2
+          ? "Stereo"
+          : properties.channels > 0
+            ? `${properties.channels}ch`
+            : "",
+    codec: properties.codec || "",
+    vbr: properties.bitrateMode || "",
+  });
+}
 
 function getTagLib(): Promise<TagLib> {
   if (!tagLibPromise) {
@@ -135,7 +158,32 @@ async function readAudioMeta(
     modified: new Date(file.lastModified).toLocaleString(),
   };
 
-  if (skipAudioDecode || !arrayBuffer) {
+  // A large scan skips decoding PCM, not the container's duration/technical metadata.
+  if (!technicalMetadata.has(file)) {
+    try {
+      await queueTagLibRead(async () => {
+        const taglib = await getTagLib();
+        const audio = await taglib.open({
+          name: file.name,
+          data: new Uint8Array(await file.arrayBuffer()),
+        });
+        try {
+          rememberAudioProperties(file, audio);
+        } finally {
+          audio.dispose();
+        }
+      });
+    } catch {
+      /* Unsupported/damaged containers can still expose text tags. */
+    }
+  }
+  const technical = technicalMetadata.get(file);
+  if (technical) {
+    for (const [key, value] of Object.entries(technical)) {
+      if (value) (meta as unknown as Record<string, string>)[key] = value;
+    }
+  }
+  if (meta.length || skipAudioDecode || !arrayBuffer) {
     return meta;
   }
 
@@ -202,7 +250,7 @@ export async function readMp3(
   const format = detectFormat(file);
   const tags =
     format === "wav"
-      ? await readWavTags(file, readEmbeddedCover)
+      ? await queueTagLibRead(() => readWavTags(file, readEmbeddedCover))
       : await readTagsWithJsMedia(file, readEmbeddedCover);
   const rp =
     relativePath || (file as File & { webkitRelativePath?: string }).webkitRelativePath || "";
@@ -210,7 +258,7 @@ export async function readMp3(
   const folderPath = extractFolderPath(rp || file.name);
 
   let arrayBuffer: ArrayBuffer | null = null;
-  if (!skipAudioDecode) {
+  if (!skipAudioDecode && !technicalMetadata.get(file)?.length) {
     try {
       arrayBuffer = await file.arrayBuffer();
     } catch {
@@ -330,13 +378,10 @@ async function readTagsWithJsMedia(file: File, readEmbeddedCover: boolean): Prom
     });
   });
 
-  if (primary.title.trim()) return primary;
-
   try {
-    const fallback = await queueTagLibRead(() =>
-      readTextTagsWithTagLib(file, readEmbeddedCover && !primary.cover),
-    );
-    return mergeMissingTags(primary, fallback);
+    const fallback = await queueTagLibRead(() => readTextTagsWithTagLib(file, readEmbeddedCover));
+    // Prefer the actual embedded FrontCover, not jsmediatags' first picture (which may be a disc).
+    return { ...mergeMissingTags(primary, fallback), cover: fallback.cover || primary.cover };
   } catch {
     return primary;
   }
@@ -347,6 +392,7 @@ async function readTextTagsWithTagLib(file: File, readEmbeddedCover: boolean): P
   const taglib = await getTagLib();
   const audioFile = await taglib.open({ name: file.name, data: bytes });
   try {
+    rememberAudioProperties(file, audioFile);
     const properties = audioFile.properties();
     const tags: Mp3Tags = {
       title: firstValue(properties.title),
@@ -403,6 +449,7 @@ async function readWavTags(file: File, readEmbeddedCover: boolean): Promise<Mp3T
   const taglib = await getTagLib();
   const audioFile = await taglib.open({ name: file.name, data: bytes });
   try {
+    rememberAudioProperties(file, audioFile);
     const properties = audioFile.properties();
     const track = joinNumberPair(
       firstValue(properties.trackNumber),

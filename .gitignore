@@ -9,6 +9,11 @@ lerna-debug.log*
 
 node_modules
 dist
+dist-desktop
+dist-package
+desktop/assets/*.png
+desktop/assets/*.icns
+desktop/assets/*.ico
 dist-ssr
 .output
 .vinxi

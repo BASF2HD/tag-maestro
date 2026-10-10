@@ -1,6 +1,6 @@
 # Tag Maestro standalone desktop plan
 
-Status: design proposal only. This update does not produce or claim tested `.app`, `.dmg` or `.exe` installers.
+Status: Apple Silicon `.app`, `.dmg` and app ZIP 1.0.1 builds exist locally. Installer checksum and packaged origin/sandbox, metadata, artwork, playback/seek, verified deletion and restart tests pass. TagLib's dynamic bindings are enabled following explicit user approval; remote access remains blocked. See [DESKTOP-APP.md](DESKTOP-APP.md). Windows packaging and native-runner tests are configured.
 
 ## Recommended approach
 
@@ -10,7 +10,7 @@ Do not wrap a randomly chosen localhost port: changing the origin would lose acc
 
 ## File access and safety
 
-Start with a narrowly scoped native file-access adapter through an isolated preload bridge. Open Folder returns opaque capabilities for user-chosen directories, not unrestricted filesystem access. Renderer requests must be checked against those capabilities in the main process, including symlink/path traversal prevention, original-file identity and size/modification-time checks, verified writes and exact single-file deletion. Reuse the existing verified-write, format and artwork-validation logic.
+The implemented first version uses Chromium's native File System Access pickers and opaque user-chosen file/directory handles, not a preload bridge or arbitrary-path IPC. Existing original-file identity, size/modification-time checks, verified writes and exact single-file deletion remain in place. Restricted system-folder access is denied. This avoids introducing a second unrestricted filesystem interface.
 
 Never expose Node.js to the renderer, accept arbitrary paths from IPC, disable context isolation, or permit remote navigation in the app window. Keep `nodeIntegration: false`, `contextIsolation: true` and the renderer sandbox enabled. Unrelated browser permissions should remain denied. The existing browser filesystem workflow remains available in the web build.
 

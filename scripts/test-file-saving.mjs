@@ -43,6 +43,18 @@ try {
   const withCover = new File([await writeCoverToBlob(base, cover)], base.name);
   await verifyWrittenArtwork(withCover, cover);
   const row = await readMp3(withCover, undefined, true);
+  // Comment dropdown <blank> must actually remove existing embedded metadata.
+  row.tags.comment = "First comment\nSecond line";
+  const commented = new File([await writeTagsToBlob(row)], base.name);
+  const commentedRow = await readMp3(commented, undefined, true);
+  assert.equal(commentedRow.tags.comment, row.tags.comment);
+  commentedRow.tags.comment = "";
+  const blankComment = new File([await writeTagsToBlob(commentedRow)], base.name);
+  assert.equal((await readMp3(blankComment, undefined, true)).tags.comment, "");
+  assert.deepEqual(
+    wavChunks(new Uint8Array(await blankComment.arrayBuffer())).find((c) => c.id === "data").body,
+    pcm,
+  );
   row.coverEdited = true;
   row.tags.cover = undefined;
   const removed = await writeTagsToBlob(row);
@@ -100,7 +112,7 @@ try {
   await assert.rejects(writeVerifiedFile(failed, removed), /Disk full/);
   assert.equal(aborted, true);
   console.log(
-    "PASS: embedded cover replacement/deletion (including unloaded artwork), unchanged PCM audio, actual disk read-back, silent-write refusal and failed-write abort.",
+    "PASS: multiline comment replacement/removal, embedded cover replacement/deletion (including unloaded artwork), unchanged PCM audio, actual disk read-back, silent-write refusal and failed-write abort.",
   );
 } finally {
   await server.close();

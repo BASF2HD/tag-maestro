@@ -1,0 +1,28 @@
+appId: com.tagmaestro.app
+productName: Tag Maestro
+artifactName: ${productName}-${version}-${os}-${arch}.${ext}
+directories:
+  output: dist-package
+files:
+  - desktop/main.cjs
+  - desktop/security.cjs
+  - dist-desktop/**/*
+  - "!node_modules/**/*"
+asar: true
+npmRebuild: false
+mac:
+  icon: desktop/assets/icon.icns
+  target: [dmg, zip]
+  category: public.app-category.music
+  identity: null
+win:
+  icon: desktop/assets/icon.png
+  target: [nsis, portable]
+  requestedExecutionLevel: asInvoker
+nsis:
+  artifactName: ${productName}-${version}-win-${arch}-Setup.${ext}
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  perMachine: false
+portable:
+  artifactName: ${productName}-${version}-win-${arch}-Portable.${ext}

@@ -1,0 +1,40 @@
+name: Desktop test builds
+on:
+  workflow_dispatch:
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            command: dist:mac
+            binary: dist-package/mac-arm64/Tag Maestro.app/Contents/MacOS/Tag Maestro
+          - os: windows-latest
+            command: dist:win
+            binary: dist-package/win-unpacked/Tag Maestro.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: node scripts/test-table-settings.mjs
+      - run: node scripts/test-desktop-security.mjs
+      - run: node scripts/test-file-saving.mjs
+      - run: node scripts/test-library-metadata.mjs
+      - run: pnpm run ${{ matrix.command }}
+      - run: node scripts/test-desktop.mjs "${{ matrix.binary }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Tag-Maestro-${{ matrix.os }}
+          path: |
+            dist-package/*.dmg
+            dist-package/*.zip
+            dist-package/*.exe
+          if-no-files-found: error

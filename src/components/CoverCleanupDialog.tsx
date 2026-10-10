@@ -261,7 +261,7 @@ export function CoverCleanupDialog({
     >
       <DialogContent className="flex max-h-[92vh] max-w-6xl flex-col rounded-[4px] p-5">
         <DialogHeader className="pr-8">
-          <DialogTitle>Codex-assisted cover cleanup</DialogTitle>
+          <DialogTitle>Codex cover cleanup</DialogTitle>
         </DialogHeader>
         <p className="mt-2 text-xs text-muted-foreground">
           1. Export a batch → 2. Edit in Codex → 3. Import, review and save. No automatic AI calls
