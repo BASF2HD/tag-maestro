@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 const require = createRequire(import.meta.url);
 const sharp = require("sharp");
-const svg = await fs.readFile("desktop/assets/icon.svg");
+const svg = await fs.readFile("public/brand/tag-maestro-1024.png");
 await sharp(svg).resize(1024, 1024).png().toFile("desktop/assets/icon.png");
 if (process.platform === "darwin") {
   const temporary = await fs.mkdtemp(path.join(os.tmpdir(), "tag-maestro-icon-"));
@@ -29,4 +29,4 @@ if (process.platform === "darwin") {
     directory,
   ]);
 }
-console.log("Desktop icon generated from the app's music-note mark.");
+console.log("Desktop icon generated from the shared Tag Maestro music-tag logo.");

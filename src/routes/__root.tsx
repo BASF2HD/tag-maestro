@@ -82,7 +82,7 @@ export const Route = createRootRouteWithContext()({
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "TagMaestro — Music Tags & Cover Art" },
+      { title: "Tag Maestro — Music Tags & Cover Art" },
       {
         name: "description",
         content:
@@ -102,7 +102,9 @@ export const Route = createRootRouteWithContext()({
         rel: "stylesheet",
         href: appCss,
       },
-      { rel: "icon", href: "/favicon.ico", type: "image/x-icon" },
+      { rel: "icon", href: "/brand/tag-maestro-32.png?v=3", type: "image/png", sizes: "32x32" },
+      { rel: "shortcut icon", href: "/favicon.ico?v=tag-music-3", type: "image/x-icon" },
+      { rel: "apple-touch-icon", href: "/brand/tag-maestro-180.png", sizes: "180x180" },
     ],
   }),
   shellComponent: RootShell,

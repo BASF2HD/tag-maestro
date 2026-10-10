@@ -1,0 +1,16 @@
+{
+  "name": "Tag Maestro music-tag mark",
+  "generator": "Codex built-in image editor",
+  "generated": "2026-10-10",
+  "source": "public/brand/tag-maestro-1024.png",
+  "exports": [
+    { "path": "public/brand/tag-maestro-16.png", "width": 16, "height": 16 },
+    { "path": "public/brand/tag-maestro-32.png", "width": 32, "height": 32 },
+    { "path": "public/brand/tag-maestro-48.png", "width": 48, "height": 48 },
+    { "path": "public/brand/tag-maestro-64.png", "width": 64, "height": 64 },
+    { "path": "public/brand/tag-maestro-180.png", "width": 180, "height": 180 },
+    { "path": "public/brand/tag-maestro-1024.png", "width": 1024, "height": 1024 },
+    { "path": "public/favicon.ico", "sizes": [16, 32, 48] }
+  ],
+  "export": "Cropped unused outer padding, flattened alpha onto charcoal, Lanczos resized PNG and PNG-backed ICO. Desktop icons generated from the shipped master."
+}

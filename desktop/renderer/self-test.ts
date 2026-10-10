@@ -8,6 +8,7 @@ import { writeVerifiedFile } from "../../src/lib/verified-file-write";
 import { deleteSongBatch } from "../../src/lib/delete-song";
 import { AudioPreview } from "../../src/lib/audio-preview";
 import { saveLibrarySource, listLibrarySources } from "../../src/lib/library-storage";
+import { readMetadataCache, saveMetadataCache } from '../../src/lib/metadata-cache';
 import {
   defaultTableSettings,
   loadTableSettings,
@@ -55,6 +56,20 @@ export async function runDesktopSelfTest() {
       "Native Chromium file pickers",
     );
     passed.push("secure origin, sandbox, native picker APIs");
+    check(typeof window.tagMaestroDesktop?.prepareFolderRenames === 'function', 'Scoped folder rename preload is available');
+    let refused = false;
+    try { await window.tagMaestroDesktop!.prepareFolderRenames('invalid-test-capability', []); } catch { refused = true; }
+    check(refused, 'Unknown native folder capabilities are refused');
+    passed.push('restricted folder rename bridge rejects unknown capabilities');
+    check(typeof window.tagMaestroDesktop?.chooseNameLibrary === 'function', 'Names-only native bridge bundled');
+    refused = false;
+    try { await window.tagMaestroDesktop!.renameLibraryNames('invalid-test-capability', []); } catch { refused = true; }
+    check(refused, 'Unknown native archive listing capabilities refused');
+    passed.push('scoped ZIP rename bridge rejects ungranted libraries');
+    refused = false;
+    try { await window.tagMaestroDesktop!.pollNameSaveProgress('invalid-test-capability'); } catch { refused = true; }
+    check(refused, 'Live save progress refuses unknown native library capabilities');
+    passed.push('live save-progress bridge bundled and scoped');
     const defaults = defaultTableSettings(["album", "track", "title"], ["album", "title"]);
     const stage = new URL(location.href).searchParams.get("selftest");
     const root = await navigator.storage.getDirectory();
@@ -80,6 +95,8 @@ export async function runDesktopSelfTest() {
       );
       const row = await readMp3(await handle.getFile());
       check(row.tags.title === "Desktop verified title", "Saved song metadata survives restart");
+      const hit = await readMetadataCache('desktop-self-test', [{ file: row.file, path: 'desktop-test.wav' }]);
+      check(hit.get('desktop-test.wav')?.tags.title === row.tags.title, 'Metadata cache survives process restart');
       passed.push(
         "restart persistence: layout, sorting, IndexedDB library handle and verified song tags",
       );
@@ -96,6 +113,18 @@ export async function runDesktopSelfTest() {
         "Header duration and sample rate are available when decoding is skipped",
       );
       passed.push("scan-time duration without audio decoding");
+      // The actual browser bundle must read ranges, not silently fall back to all bytes.
+      const largeBytes = pcm(), payloadSize = 20 * 1024 * 1024;
+      const header = largeBytes.slice(0, 44), headerView = new DataView(header.buffer);
+      headerView.setUint32(4, payloadSize + 36, true); headerView.setUint32(40, payloadSize, true);
+      const largeFile = new File([header, new Uint8Array(payloadSize)], 'range-test.wav', { type: 'audio/wav' });
+      let readBytes = 0;
+      const slice = largeFile.slice.bind(largeFile);
+      largeFile.arrayBuffer = async () => { throw new Error('Unexpected whole-file read'); };
+      largeFile.slice = (start, end, type) => { const blob = slice(start, end, type), read = blob.arrayBuffer.bind(blob); blob.arrayBuffer = async () => { readBytes += blob.size; return read(); }; return blob; };
+      const largeRow = await readMp3(largeFile, 'NAS/Album/range-test.wav', true, false);
+      check(Boolean(largeRow.meta.length) && largeRow.meta.frequency === '8000 Hz' && readBytes < 100000, 'Large WAV range-only parsing in sandbox');
+      passed.push(`NAS metadata range reads: ${readBytes} bytes of a 20 MB fixture`);
       row.tags.title = "Desktop verified title";
       const output = await writeTagsToBlob(row);
       const saved = await writeVerifiedFile(handle, output);
@@ -120,6 +149,13 @@ export async function runDesktopSelfTest() {
       coverRow.coverEdited = true;
       const cleared = await writeVerifiedFile(handle, await writeTagsToBlob(coverRow));
       await verifyWrittenArtwork(cleared, undefined);
+      const cacheRow = await readMp3(cleared, 'desktop-test.wav', true, false);
+      cacheRow.libraryRelativePath = 'desktop-test.wav';
+      await saveMetadataCache('desktop-self-test', [cacheRow]);
+      check((await readMetadataCache('desktop-self-test', [{ file: cleared, path: 'desktop-test.wav' }])).size === 1, 'Metadata cache hit');
+      const changed = new File([cleared], cleared.name, { lastModified: cleared.lastModified + 1000 });
+      check((await readMetadataCache('desktop-self-test', [{ file: changed, path: 'desktop-test.wav' }])).size === 0, 'Changed file invalidates metadata cache');
+      passed.push('metadata cache, changed-file invalidation and restart persistence');
       passed.push("embedded artwork replacement/removal on isolated real filesystem handles");
       const player = new AudioPreview(
         new Audio(),

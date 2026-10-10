@@ -8,7 +8,6 @@ import { Label } from "@/components/ui/label";
 import { TagFieldCombo, KEEP_TAG_VALUE as MULTI } from "@/components/TagFieldCombo";
 import { Separator } from "@/components/ui/separator";
 import {
-  Music4,
   Upload,
   Save,
   Wand2,
@@ -37,6 +36,8 @@ import {
 } from "@/components/icons";
 import {
   readMp3,
+  audioRow,
+  readEmbeddedArtwork,
   writeTagsToBlob,
   dataUrlToCover,
   renameByPattern,
@@ -49,9 +50,12 @@ import {
   type FileMeta,
 } from "@/lib/mp3";
 import { FolderRenameDialog } from "@/components/FolderRenameDialog";
+import { LibraryNamesDialog } from "@/components/LibraryNamesDialog";
+import { readMetadataCache, saveMetadataCache } from '@/lib/metadata-cache';
 import { CoverCleanupDialog } from "@/components/CoverCleanupDialog";
 import { EditableTableCell as TdCell } from "@/components/EditableTableCell";
 import { writeVerifiedFile } from "@/lib/verified-file-write";
+import { canRenameOriginalFolder, hasTagEdits, prepareOriginalFolderRenames } from "@/lib/folder-renames";
 import { AudioPreview, type PreviewState } from "@/lib/audio-preview";
 import { deleteSongBatch, nextAfterDeletion } from "@/lib/delete-song";
 import { PreviewTransport, RowSeekControl } from "@/components/PreviewControls";
@@ -106,6 +110,7 @@ type FolderFileEntry = {
   relativePath: string;
   handle?: FileSystemFileHandle;
   parentHandle?: FileSystemDirectoryHandle;
+  folderParentHandle?: FileSystemDirectoryHandle;
   libraryPath?: string;
 };
 
@@ -132,6 +137,8 @@ type LoadOptions = {
   sourceId?: string;
   silent?: boolean;
   generation?: number;
+  streaming?: boolean;
+  onSkipped?: (count: number) => void;
 };
 
 const FIELDS: { key: TagKey; label: string }[] = [
@@ -236,30 +243,37 @@ async function collectDirectoryEntries(
   directoryHandle: FileSystemDirectoryHandle,
   onProgress?: (count: number, currentDir: string) => void,
   shouldCancel?: () => boolean,
+  onBatch?: (entries: FolderFileEntry[]) => Promise<void>,
 ): Promise<FolderFileEntry[]> {
   const entries: FolderFileEntry[] = [];
+  let found = 0;
   const pauseForPaint = () => new Promise<void>((resolve) => window.setTimeout(resolve, 0));
   let lastPaintTime = Date.now();
 
-  async function walk(handle: FileSystemDirectoryHandle, path: string) {
+  async function walk(handle: FileSystemDirectoryHandle, path: string, folderParentHandle?: FileSystemDirectoryHandle) {
     if (shouldCancel?.()) return;
     for await (const [name, child] of (handle as any).entries()) {
       if (shouldCancel?.()) return;
+      // Recovery folders from an explicitly approved overwrite are not live albums.
+      if (name.startsWith(".tag-maestro-replaced-")) continue;
       const relativePath = path ? `${path}/${name}` : name;
       if (child.kind === "directory") {
-        onProgress?.(entries.length, relativePath);
+        onProgress?.(found, relativePath);
         if (Date.now() - lastPaintTime > 150) {
           lastPaintTime = Date.now();
           await pauseForPaint();
         }
-        await walk(child as FileSystemDirectoryHandle, relativePath);
+        await walk(child as FileSystemDirectoryHandle, relativePath, handle);
       } else if (child.kind === "file") {
+        if (!SUPPORTED_EXTS.some(ext => name.toLowerCase().endsWith(ext))) continue;
         const fileHandle = child as FileSystemFileHandle;
         const file = await fileHandle.getFile();
-        entries.push({ file, relativePath, handle: fileHandle, parentHandle: handle });
-        if (entries.length % 50 === 0 || Date.now() - lastPaintTime > 150) {
+        entries.push({ file, relativePath, handle: fileHandle, parentHandle: handle, folderParentHandle });
+        found++;
+        if (onBatch && entries.length >= 100) await onBatch(entries.splice(0));
+        if (found % 50 === 0 || Date.now() - lastPaintTime > 150) {
           lastPaintTime = Date.now();
-          onProgress?.(entries.length, path);
+          onProgress?.(found, path);
           await pauseForPaint();
         }
       }
@@ -267,6 +281,7 @@ async function collectDirectoryEntries(
   }
 
   await walk(directoryHandle, directoryHandle.name);
+  if (onBatch && entries.length && !shouldCancel?.()) await onBatch(entries.splice(0));
   return entries;
 }
 
@@ -338,6 +353,7 @@ export function TagMaestro() {
   const [pattern] = useState("%artist% - %title%");
   const [filter, setFilter] = useState("");
   const [folderRenameOpen, setFolderRenameOpen] = useState(false);
+  const [libraryNamesOpen, setLibraryNamesOpen] = useState(false);
   const [coverCleanupOpen, setCoverCleanupOpen] = useState(false);
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
   const [converterOpen, setConverterOpen] = useState(false);
@@ -376,7 +392,7 @@ export function TagMaestro() {
   const selectedDirty = selectedFiles.filter((file) => file.dirty);
   const saveTargets = selectedDirty.length ? selectedDirty : files.filter((file) => file.dirty);
   const savesOriginals = saveTargets.length > 0 && saveTargets.every((file) =>
-    file.sourceHandle && file.editedFolderName === file.folderName &&
+    file.sourceHandle && (file.editedFolderName === file.folderName || canRenameOriginalFolder(file)) &&
       (directSaveFilename(file) === file.file.name || file.sourceDirectoryHandle),
   );
 
@@ -387,16 +403,12 @@ export function TagMaestro() {
     coverProbeIds.current.add(first.id);
     let cancelled = false;
     let settled = false;
-    void readMp3(
-      first.file, first.meta.path || first.file.name, true, true,
-      first.sourceHandle, first.sourceDirectoryHandle,
-    ).then((loaded) => {
+    void readEmbeddedArtwork(first.file).then((cover) => {
       settled = true;
       if (cancelled) {
         coverProbeIds.current.delete(first.id);
         return;
       }
-      const cover = loaded.tags.cover;
       if (!cover) return;
       setFiles((prev) => prev.map((f) =>
         f.id === first.id && f.file === first.file && !f.coverEdited && !f.tags.cover
@@ -451,11 +463,12 @@ export function TagMaestro() {
             entry.file,
             entry.relativePath,
             skipAudio,
-            true,
+            !skipAudio,
             entry.handle,
             entry.parentHandle,
           )),
           librarySourceId: options.sourceId,
+          sourceFolderParentHandle: entry.folderParentHandle,
           libraryRelativePath: options.sourceId
             ? (entry.libraryPath ?? entry.relativePath)
             : undefined,
@@ -580,16 +593,16 @@ export function TagMaestro() {
     }
 
     if (!audioFiles.length) {
-      setImportProgress(null);
-      setBusy(null);
+      if (!options.streaming) { setImportProgress(null); setBusy(null); }
       if (!options.silent) toast.error("No supported audio files found in folder");
       return 0;
     }
 
     // Process audio files in batches for smooth progress
-    const BATCH = 25;
+    const BATCH = 100;
     const total = audioFiles.length;
     let loadedCount = 0;
+    let skippedCount = 0;
     setBusy(`Reading files… 0/${total}`);
     setImportProgress({
       title: "Reading audio tags",
@@ -606,9 +619,16 @@ export function TagMaestro() {
           break;
         }
         const batch = audioFiles.slice(i, i + BATCH);
-        const loaded = await Promise.all(
-          batch.map(async (entry) => ({
-            ...(await readMp3(
+        const cached = await readMetadataCache(options.sourceId, batch.map(entry => ({ file: entry.file, path: entry.libraryPath ?? entry.relativePath })));
+        const loaded: Mp3File[] = [];
+        // Four concurrent readers keep the NAS responsive instead of launching 25 reads.
+        for (let at = 0; at < batch.length; at += 4) {
+          if (options.generation !== undefined && options.generation !== libraryLoadGeneration.current) break;
+          const group = await Promise.all(batch.slice(at, at + 4).map(async (entry): Promise<Mp3File | null> => {
+            try {
+            const hit = cached.get(entry.libraryPath ?? entry.relativePath);
+            return {
+            ...(hit ? audioRow(entry.file, entry.relativePath, structuredClone(hit.tags), { ...hit.meta, path: entry.relativePath }, entry.handle, entry.parentHandle) : await readMp3(
               entry.file,
               entry.relativePath,
               true,
@@ -617,11 +637,19 @@ export function TagMaestro() {
               entry.parentHandle,
             )),
             librarySourceId: options.sourceId,
+            sourceFolderParentHandle: entry.folderParentHandle,
             libraryRelativePath: options.sourceId
               ? (entry.libraryPath ?? entry.relativePath)
               : undefined,
-          })),
-        );
+          }; } catch (error) {
+            skippedCount++;
+            console.warn('Skipped unreadable audio file:', entry.relativePath, error);
+            return null;
+          } }));
+          loaded.push(...group.filter((row): row is Mp3File => row !== null));
+        }
+        if (options.generation !== undefined && options.generation !== libraryLoadGeneration.current) break;
+        await saveMetadataCache(options.sourceId, loaded);
 
 
         setFiles((prev) => {
@@ -648,17 +676,21 @@ export function TagMaestro() {
       }
       if (!options.silent) {
         toast.success(`Loaded ${loadedCount} file${loadedCount > 1 ? "s" : ""} from folder`);
+        if (skippedCount) toast.info(`Skipped ${skippedCount} unreadable audio files. The remaining library was loaded.`);
       }
     } finally {
-      setBusy(null);
-      setImportProgress(null);
+      if (!options.streaming && (options.generation === undefined || options.generation === libraryLoadGeneration.current)) {
+        setBusy(null); setImportProgress(null);
+      }
     }
+    if (skippedCount) options.onSkipped?.(skippedCount);
     return loadedCount;
   }, []);
 
   const loadDirectoryHandle = useCallback(async (
     directoryHandle: FileSystemDirectoryHandle,
   ) => {
+    const generation = libraryLoadGeneration.current;
     try {
       const savedSources = (await listLibrarySources()).filter(
         (source): source is Extract<StoredLibrarySource, { kind: "directory" }> =>
@@ -690,8 +722,8 @@ export function TagMaestro() {
         title: "Scanning folder",
         message: `Scanning ${directoryHandle.name}…`,
       });
-      const generation = libraryLoadGeneration.current;
-      const entries = await collectDirectoryEntries(
+      let loaded = 0, skipped = 0;
+      await collectDirectoryEntries(
         directoryHandle,
         (count, currentDir) => {
           setImportProgress({
@@ -700,16 +732,19 @@ export function TagMaestro() {
           });
         },
         () => generation !== libraryLoadGeneration.current,
+        async entries => { loaded += await handleAddFolder(entries, { sourceId: source.id, generation, silent: true, streaming: true, onSkipped: count => { skipped += count; } }); },
       );
       if (generation !== libraryLoadGeneration.current) return;
-      const loaded = await handleAddFolder(entries, { sourceId: source.id, generation });
       if (!loaded) await removeLibrarySource(source.id);
+      else toast.success(`Loaded ${loaded.toLocaleString()} songs. Archive renaming is available in Folder & archive names.`);
+      if (skipped) toast.info(`Skipped ${skipped.toLocaleString()} unreadable audio files. Other albums were still loaded.`);
     } catch (e: any) {
       if (e?.name !== "AbortError" && !e?.message?.includes("already active")) {
+        console.error('Folder loading failed:', e);
         toast.error(e?.message || "Folder open failed");
       }
-      setBusy(null);
-      setImportProgress(null);
+    } finally {
+      if (generation === libraryLoadGeneration.current) { setBusy(null); setImportProgress(null); }
     }
   }, [handleAddFolder]);
 
@@ -793,18 +828,14 @@ export function TagMaestro() {
             stillPending.push(source);
             continue;
           }
-          const entries = (
-            await collectDirectoryEntries(
-              source.handle,
-              undefined,
-              () => restoreGeneration !== libraryLoadGeneration.current,
-            )
-          ).filter((entry) => !excluded.has(entry.relativePath));
-          restoredFiles += await handleAddFolder(entries, {
-            sourceId: source.id,
-            silent: true,
-            generation: restoreGeneration,
-          });
+          await collectDirectoryEntries(source.handle, undefined,
+            () => restoreGeneration !== libraryLoadGeneration.current,
+            async entries => {
+              restoredFiles += await handleAddFolder(entries.filter(entry => !excluded.has(entry.relativePath)), {
+                sourceId: source.id, silent: true, streaming: true, generation: restoreGeneration,
+              });
+            },
+          );
         } else {
           const entries: FolderFileEntry[] = [];
           let needsPermission = false;
@@ -1174,8 +1205,13 @@ export function TagMaestro() {
   async function saveAll() {
     const targets = saveTargets;
     if (!targets.length) return;
+    const folderEdits = targets.some(m => m.editedFolderName !== m.folderName);
+    if (folderEdits && !savesOriginals) {
+      toast.error("To rename original folders, use the desktop app and Add Folder to open the parent music library. No copies were exported.");
+      return;
+    }
     const canSaveDirect = targets.every((m) => {
-      if (m.editedFolderName !== m.folderName) return false;
+      if (m.editedFolderName !== m.folderName && !canRenameOriginalFolder(m)) return false;
       if (!m.sourceHandle) return false;
       const targetName = directSaveFilename(m);
       return targetName === m.file.name || Boolean(m.sourceDirectoryHandle);
@@ -1187,8 +1223,12 @@ export function TagMaestro() {
     );
     try {
       if (canSaveDirect) {
+        const commitFolders = await prepareOriginalFolderRenames(files, targets);
+        const savedRows = new Map<string, Mp3File>();
         let saved = 0;
         for (const m of targets) {
+          // A folder-only change does not rewrite song metadata or audio bytes.
+          if (!hasTagEdits(m) && directSaveFilename(m) === m.file.name && m.editedFolderName !== m.folderName) continue;
           const originalHandle = m.sourceHandle as WritableFileHandle;
           const allowed = await ensureWritePermission(originalHandle);
           if (!allowed) throw new Error("Write permission was not granted for the selected folder");
@@ -1231,17 +1271,22 @@ export function TagMaestro() {
           const relativePath = m.libraryRelativePath
             ? replacePathFilename(m.libraryRelativePath, targetName)
             : undefined;
-          setFiles((prev) => prev.map((f) => f.id === m.id ? {
-            ...f, file: verified, sourceHandle: targetHandle,
-            libraryRelativePath: relativePath ?? f.libraryRelativePath,
-            meta: { ...f.meta, path: replacePathFilename(f.meta.path, verified.name), size: `${(verified.size / (1024 * 1024)).toFixed(2)} MB`, modified: new Date(verified.lastModified).toLocaleString() },
-            renamedBase: undefined, dirty: false, coverEdited: false, original: cloneTags(m.tags),
-          } : f));
+          const savedRow: Mp3File = {
+            ...m, file: verified, sourceHandle: targetHandle,
+            libraryRelativePath: relativePath ?? m.libraryRelativePath,
+            meta: { ...m.meta, path: replacePathFilename(m.meta.path, verified.name), size: `${(verified.size / (1024 * 1024)).toFixed(2)} MB`, modified: new Date(verified.lastModified).toLocaleString() },
+            renamedBase: undefined, dirty: m.editedFolderName !== m.folderName, coverEdited: false, original: cloneTags(m.tags),
+          };
+          savedRows.set(m.id, savedRow);
+          setFiles(prev => prev.map(f => f.id === m.id ? savedRow : f));
           saved += 1;
           setBusy(`Saving directly… ${saved}/${targets.length}`);
         }
 
-        toast.success(`Saved and verified ${saved} original file${saved > 1 ? "s" : ""}`);
+        const renamedFolders = await commitFolders(files.map(f => savedRows.get(f.id) || f), rows => {
+          setFiles(prev => prev.map(f => rows.get(f.id) || f));
+        });
+        toast.success([saved ? `Saved and verified ${saved} original file${saved > 1 ? "s" : ""}` : '', renamedFolders ? `Renamed ${renamedFolders} original folder${renamedFolders > 1 ? "s" : ""} without copying songs` : ''].filter(Boolean).join('. '));
       } else if (targets.length === 1 && targets[0].editedFolderName === targets[0].folderName) {
         const m = targets[0];
         const blob = await writeTagsToBlob(m);
@@ -1328,6 +1373,13 @@ export function TagMaestro() {
       onDrop={onDrop}
     >
       <Toaster />
+      <LibraryNamesDialog open={libraryNamesOpen} onOpenChange={setLibraryNamesOpen} hasDirtyFiles={hasDirtyFiles} onSaved={async () => {
+        libraryLoadGeneration.current += 1;
+        previewRef.current?.stop();
+        setFiles([]); setSelected(new Set()); setPendingLibrarySources([]);
+        coverProbeIds.current.clear();
+        await clearLibrarySources();
+      }} />
       <FolderRenameDialog
         open={folderRenameOpen}
         onOpenChange={setFolderRenameOpen}
@@ -1377,12 +1429,10 @@ export function TagMaestro() {
         }}
       />
       <header className="relative z-30 shrink-0 border-b border-border bg-sidebar/60 backdrop-blur px-3 py-2 flex items-center gap-2">
-        <div className="flex items-center gap-2">
-          <div className="h-8 w-8 rounded-md bg-primary text-primary-foreground grid place-items-center shadow-[0_0_0_1px_var(--border)]">
-            <Music4 className="h-4 w-4" />
-          </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <img src="/brand/tag-maestro-64.png" alt="" width={32} height={32} className="h-8 w-8 shrink-0 rounded-[4px]" />
           <div>
-            <h1 className="text-sm font-semibold tracking-tight">TagMaestro</h1>
+            <h1 className="whitespace-nowrap text-sm font-semibold tracking-tight">Tag Maestro</h1>
           </div>
         </div>
 
@@ -1440,6 +1490,7 @@ export function TagMaestro() {
             },
           ]}
         />
+        <Button size="sm" variant="outline" onClick={() => setLibraryNamesOpen(true)} disabled={Boolean(busy || importProgress)} title="Fast desktop folder and archive renaming (ZIP, RAR, 7z, tar) without reading audio files">Folder &amp; archive names</Button>
         {pendingLibrarySources.length > 0 && (
           <Button
             size="sm"
@@ -1460,11 +1511,13 @@ export function TagMaestro() {
               ? "No unsaved changes"
               : savesOriginals
                 ? "Write and verify changes in original music files"
+                : saveTargets.some(f => f.editedFolderName !== f.folderName)
+                  ? "Original folder renaming requires the desktop app and the parent library folder. No copies will be exported."
                 : "Download edited copies only. Originals are unchanged; use Add Folder in Chrome/Edge for direct saving."
           }
         >
           <Save className="mr-1.5 h-4 w-4" />
-          {hasDirtyFiles && !savesOriginals ? "Export copies" : "Save originals"}
+          {hasDirtyFiles && !savesOriginals && !saveTargets.some(f => f.editedFolderName !== f.folderName) ? "Export copies" : "Save originals"}
         </Button>
         <Button
           size="sm"

@@ -43,7 +43,7 @@ function picture(type, data) {
   return result;
 }
 try {
-  const { readMp3 } = await server.ssrLoadModule("/src/lib/mp3.ts");
+  const { readMp3, readEmbeddedArtwork } = await server.ssrLoadModule("/src/lib/mp3.ts");
   const format = new Uint8Array(16),
     view = new DataView(format.buffer);
   view.setUint16(0, 1, true);
@@ -82,6 +82,7 @@ try {
   assert.deepEqual(selected.tags.cover.data, front);
   assert.notDeepEqual(selected.tags.cover.data, disc);
   assert.equal(selected.dirty, false);
+  assert.deepEqual((await readEmbeddedArtwork(source)).data, front);
   console.log(
     "PASS: fast-scan duration/sample rate, lazy embedded FrontCover selection ahead of disc artwork; no original files changed.",
   );

@@ -26,6 +26,11 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: node scripts/test-table-settings.mjs
       - run: node scripts/test-desktop-security.mjs
+      - run: node scripts/test-desktop-permissions.mjs
+      - run: node scripts/test-folder-renames.mjs
+      - run: node scripts/test-folder-save.mjs
+      - run: node scripts/test-name-inventory.mjs
+      - run: node scripts/test-nas-metadata.mjs
       - run: node scripts/test-file-saving.mjs
       - run: node scripts/test-library-metadata.mjs
       - run: pnpm run ${{ matrix.command }}

@@ -232,7 +232,7 @@ export function FolderRenameDialog({
           <div>
             <DialogTitle className="text-base font-semibold">Bulk Rename Folder Names</DialogTitle>
             <p className="text-xs text-muted-foreground">
-              Perform batch adjustments on the album folder names. These changes will apply on folder export.
+              Adjust album folder names, then use Save originals in the desktop app to rename the original folders without copying songs.
             </p>
           </div>
         </DialogHeader>

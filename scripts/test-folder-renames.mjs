@@ -1,0 +1,51 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { createRequire } from 'node:module';
+import { createHash } from 'node:crypto';
+const { FolderRenames } = createRequire(import.meta.url)('../desktop/folder-renames.cjs');
+const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'tag-maestro-folder-rename-')));
+const service = new FolderRenames();
+const { token } = await service.grant(root);
+const bytes = Buffer.from('synthetic music bytes — never modify real songs');
+async function album(name) {
+  await fs.mkdir(path.join(root, name));
+  await fs.writeFile(path.join(root, name, 'song.wav'), bytes);
+  await fs.writeFile(path.join(root, name, 'cover.png'), 'loose artwork');
+  const stat = await fs.stat(path.join(root, name, 'song.wav'));
+  return { relative: name, name: path.basename(name) + ' renamed', anchor: { name: 'song.wav', size: stat.size, modified: Math.trunc(stat.mtimeMs), digest: createHash('sha256').update(bytes).digest('hex') } };
+}
+const a = await album('Album A'), b = await album('Album B');
+const before = await fs.stat(path.join(root, a.relative, 'song.wav'));
+const folderBefore = await fs.stat(path.join(root, a.relative));
+const transaction = await service.prepare(token, [a, b]);
+assert.deepEqual((await service.commit(transaction)).renamed, [{ relative: a.relative, name: a.name }, { relative: b.relative, name: b.name }]);
+const after = await fs.stat(path.join(root, a.name, 'song.wav'));
+assert.equal(before.ino, after.ino); assert.equal(before.mtimeMs, after.mtimeMs);
+assert.equal(folderBefore.ino, (await fs.stat(path.join(root, a.name))).ino);
+assert.deepEqual(await fs.readFile(path.join(root, a.name, 'song.wav')), bytes);
+assert.equal(await fs.readFile(path.join(root, a.name, 'cover.png'), 'utf8'), 'loose artwork');
+await assert.rejects(service.commit(transaction), /expired/);
+const c = await album('Album C');
+const parent = await album('Parent'), nearby = await album('Parent-other'), nested = await album('Parent/Child');
+await assert.rejects(service.prepare(token, [parent, nearby, nested]), /nested folders/);
+await assert.rejects(service.prepare(token, [{ ...c, name: a.name }]), /already exists/);
+for (const name of ['../outside', 'CON', 'bad/name', 'bad\\name', '.', 'bad.']) await assert.rejects(service.prepare(token, [{ ...c, name }]), /Invalid/);
+await assert.rejects(service.prepare(token, [{ ...c, relative: '../outside' }]), /Invalid/);
+await assert.rejects(service.prepare(token, [{ ...c, anchor: { ...c.anchor, digest: 'incorrect' } }]), /does not match/);
+await assert.rejects(service.prepare('fake', [c]), /expired/);
+const stale = await service.prepare(token, [c]);
+await fs.mkdir(path.join(root, c.name));
+assert.match((await service.commit(stale)).error, /destination/);
+assert.deepEqual(await fs.readFile(path.join(root, c.relative, 'song.wav')), bytes);
+const d = await album('Album D');
+const changed = await service.prepare(token, [d]);
+await fs.rename(path.join(root, d.relative), path.join(root, 'Original D'));
+await fs.mkdir(path.join(root, d.relative));
+assert.match((await service.commit(changed)).error, /changed/);
+if (process.platform !== 'win32') {
+  await fs.symlink(path.join(root, a.name), path.join(root, 'link'));
+  await assert.rejects(service.prepare(token, [{ ...a, relative: 'link', name: 'linked rename' }]), /symbolic link/);
+}
+console.log('PASS: real directory renames preserve inode, audio, artwork and mtime; collision, traversal, wrong-library, changed-folder and symlink checks. Fixtures: ' + root);

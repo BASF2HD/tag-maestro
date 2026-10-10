@@ -11,6 +11,10 @@ node_modules
 dist
 dist-desktop
 dist-package
+dist-package-test
+dist-package-fix
+dist-package-conflicts
+dist-package-progress
 desktop/assets/*.png
 desktop/assets/*.icns
 desktop/assets/*.ico

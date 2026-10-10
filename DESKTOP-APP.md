@@ -1,53 +1,39 @@
-# Tag Maestro desktop test build
+# Tag Maestro desktop builds
 
-## Current status
-
-An offline Electron desktop bundle, Apple Silicon Mac app, DMG installer and app ZIP have been built locally. Windows x64 NSIS installer and portable EXE builds also completed successfully on a native Windows runner. No development server, separate browser or Node installation is required by the packaged app.
-
-The user approved `unsafe-eval` for the bundled TagLib/Emscripten JavaScript bindings. The Mac 1.0.1 packaged integration test now passes metadata save/read-back, embedded artwork replacement/removal, audio playback/seek, verified deletion, scan-time duration, and restart persistence. Node remains disabled; renderer sandboxing, context isolation and blocked remote/network access remain enabled.
-
-Local outputs:
-
-- `dist-package/mac-arm64/Tag Maestro.app`
-- `dist-package/Tag Maestro-1.0.1-mac-arm64.dmg`
-- `dist-package/Tag Maestro-1.0.1-mac-arm64.zip`
-
-The DMG checksum has been verified with `hdiutil verify`. These are unsigned local test builds; public distribution needs Apple signing/notarization and separate Windows signing. No installers have been published.
-
-Both native build jobs and packaged tests passed in [GitHub Actions run 38039632681](https://github.com/BASF2HD/tag-maestro/actions/runs/38039632681), built from commit `c2b96e68ce935d281f82b9de1ccf4c1e40fd0d30`. The Actions artifacts contain the Mac DMG/app ZIP and Windows Setup/Portable EXEs. These are build artifacts, not a public GitHub Release.
+[Downloads](https://github.com/BASF2HD/tag-maestro/releases) · [Website](https://BASF2HD.github.io/tag-maestro/)
 
 ## Build and test
 
-Use Node 24 and pnpm 11.25.0 on the build machine:
+Use Node 24 and pnpm 11.25.0 on the target OS:
 
 ```sh
 pnpm install --frozen-lockfile
-pnpm desktop         # build and run locally, without a dev server
-pnpm dist:mac        # Apple Silicon .app, .dmg and ZIP, on macOS
-pnpm dist:win        # x64 installer and portable .exe, on Windows
-pnpm test:desktop    # isolated synthetic metadata/audio/deletion/restart tests
+pnpm desktop
+pnpm dist:mac
+pnpm dist:win
+node scripts/test-release.mjs
+node scripts/test-desktop.mjs "path/to/packaged/executable"
 ```
 
-`scripts/test-desktop.mjs` also accepts an absolute packaged executable path as its first argument. It creates an isolated temporary app profile and synthetic audio fixtures, never opens or alters the user's music library, and retains the fixture profile for diagnosis. Full native tests must pass before distributing installers.
+Apple Silicon builds contain an .app, DMG and app ZIP; Windows x64 builds contain Setup and Portable EXEs. No Node.js, separate browser or server is needed to run them.
 
-The manual `Desktop test builds` GitHub workflow builds Mac and Windows targets, runs fixture tests, and uploads artifacts only after success. It is not automatically dispatched or published by local packaging.
+The release-tag workflow builds on native macOS and Windows runners, tests actual packaged executables with isolated profiles and synthetic files, then publishes assets and SHA256SUMS only if both jobs pass. A manual retry requires an existing version tag. Builds are unsigned and not Apple-notarized; signing credentials must be configured separately before claiming trusted/signed distribution.
 
-## Local storage and safety
+## Local storage and permissions
 
-- Stable `tagmaestro://app` secure origin and persistent Electron session preserve preferences and library handles across restarts. Browser-app settings/libraries do not automatically transfer; select your source folders in the desktop app.
-- Node is disabled in the renderer; context isolation and sandboxing are enabled. There is no filesystem IPC/preload bridge.
-- Native Chromium file/folder pickers grant scoped handles. Restricted system-folder access, remote navigation, new windows, webviews and outbound network requests are blocked.
-- Existing verified-save and exact-file deletion checks are reused. Single and bulk delete remain immediate, permanent operations as requested; they are not Trash operations.
-- All UI, TagLib/WASM and artwork assets are packaged locally. Desktop and existing web build entry points remain separate.
+A stable `tagmaestro://app` secure origin and persistent Electron session retain preferences and library handles across restarts. Browser settings and handles do not automatically transfer; choose folders in the desktop app.
 
-Verified locally: renderer TypeScript/web build, app-origin/path-confinement tests, table preferences, cover-batch settings, embedded-cover/verified-save regression tests, scan-time length and front-cover preference, and the actual packaged Mac app's isolated metadata/artwork/playback/seek/deletion/restart tests. The same packaged tests also passed on native Mac and Windows GitHub runners. DMG integrity passes. Tests do not modify user music. Interactive folder access and further format testing should be performed on disposable copies before editing originals.
+Node is disabled in the renderer. Context isolation, sandboxing, blocked remote navigation and outbound-network restrictions remain enabled. The bundled TagLib/Emscripten engine uses dynamic JavaScript evaluation, explicitly approved by the user.
 
-## Library editing changes in 1.0.1
+Chromium file pickers grant scoped handles for tags/artwork. The preload exposes narrow native capabilities for original-folder and folder/archive-name renames: the native chooser grants the library, opaque IDs scope the operation, and source identity, parent paths and conflict destinations are revalidated before changes. Unknown/expired capabilities are rejected; there is no general arbitrary-path filesystem API.
 
-- Fast library scans read duration/sample rate/bitrate from container properties, without decoding the full song.
-- The editor lazy-loads the selected song's embedded artwork. It prefers FrontCover, displays the complete image without cropping, and no longer injects a random image from a `covers/` subfolder.
-- Bulk Edit's Target field picker includes Filename, Folder name, Title, Artist, Album, Album Artist, Composer, Genre, Year, Track, Discnumber, Tag, Comment and BPM. The target row does not shrink away inside the dialog. Folder name changes affect exported paths, not original folders on disk; they force an export rather than claiming a direct folder rename.
-- Codex cover cleanup remains a dedicated toolbar button. Its duplicate Tools entry has been removed.
-- Comment supports keep/blank/existing-value choices and multiline editing.
+## Library changes
 
-For an already-loaded web library, save unrelated pending edits first, then use Tools → Reload tags from files to refresh embedded covers and lengths. Folder images are no longer silently substituted for embedded artwork.
+- [Folder name edits](desktop/FOLDER-RENAMING.md) save originals in place in the desktop app, without exporting song copies.
+- Names-only mode lists folders plus ZIP/RAR/7z/tar archives without extraction or reading songs. Skip, cancel, or overwrite with a hidden sibling backup resolves conflicts. Progress shows phases and actual changed/skipped counts.
+- [NAS metadata scanning](desktop/NAS-LIBRARIES.md) uses range reads, bounded concurrency, lazy embedded artwork and cached metadata. Real speed still depends on NAS latency and connection.
+- The editor prefers embedded FrontCover over disc artwork; bulk find/replace has a target-field selector; comment supports keep/clear/value choices.
+- Cover cleanup is a separate reviewed Codex batch workflow, not an automatic image API.
+- Verified tag/artwork saves read back disk bytes. Single/bulk song deletion is immediate and permanent, not Trash.
+
+Tests never touch user music. Native fixtures cover metadata/artwork save/remove, playback/seek, deletion safety, scopes, scan-time duration, progress/conflicts and restart persistence. Back up originals and test unfamiliar formats on copies before bulk editing.

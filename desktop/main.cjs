@@ -1,8 +1,9 @@
-const { app, BrowserWindow, Menu, protocol, session, net, dialog } = require("electron");
+const { app, BrowserWindow, Menu, protocol, session, net, dialog, ipcMain } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs/promises");
 const { pathToFileURL } = require("node:url");
 const { ORIGIN, appURL, assetPath } = require("./security.cjs");
+const { canCheckPermission } = require('./permissions.cjs');
 const test = process.argv.includes("--desktop-self-test");
 const stage = process.argv.find((arg) => arg.startsWith("--test-stage="))?.split("=")[1] || "write";
 const profile = process.argv
@@ -23,6 +24,39 @@ protocol.registerSchemesAsPrivileged([
 const CSP =
   "default-src 'none'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; font-src 'self' data:; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-src 'none'";
 let window;
+const folderRenames = new (require('./folder-renames.cjs').FolderRenames)();
+const nameInventory = new (require('./name-inventory.cjs').NameInventory)();
+let activeInventory;
+function trusted(event) {
+  if (event.sender !== window?.webContents || event.senderFrame !== window.webContents.mainFrame || !appURL(event.senderFrame.url)) throw new Error('Unauthorized folder operation');
+}
+ipcMain.handle('folders:choose-root', async (event, expectedName) => {
+  trusted(event);
+  if (typeof expectedName !== 'string' || !expectedName) throw new Error('Missing library name');
+  const result = await dialog.showOpenDialog(window, {
+    title: `Choose the loaded ${expectedName} library folder to enable original folder renaming`,
+    properties: ['openDirectory'], buttonLabel: 'Allow folder renaming',
+  });
+  if (result.canceled || !result.filePaths.length) return null;
+  if (path.basename(result.filePaths[0]) !== expectedName) throw new Error(`Choose the loaded ${expectedName} folder, not an album inside it`);
+  return folderRenames.grant(result.filePaths[0]);
+});
+ipcMain.handle('folders:prepare', (event, token, plans) => { trusted(event); return folderRenames.prepare(token, plans); });
+ipcMain.handle('folders:commit', (event, transaction) => { trusted(event); return folderRenames.commit(transaction); });
+ipcMain.handle('names:choose-root', async (event) => {
+  trusted(event);
+  const result = await dialog.showOpenDialog(window, { title: 'Choose a library for fast folder and archive renaming', properties: ['openDirectory'], buttonLabel: 'Load names only' });
+  if (result.canceled || !result.filePaths.length) return null;
+  if (activeInventory) await nameInventory.release(activeInventory);
+  const job = await nameInventory.start(result.filePaths[0]);
+  activeInventory = job.id;
+  return job;
+});
+ipcMain.handle('names:poll', (event, id, offset) => { trusted(event); return nameInventory.poll(id, offset); });
+ipcMain.handle('names:save-progress', (event, id) => { trusted(event); return nameInventory.pollSaveProgress(id); });
+ipcMain.handle('names:stop', (event, id) => { trusted(event); nameInventory.stop(id); });
+ipcMain.handle('names:release', async (event, id) => { trusted(event); await nameInventory.release(id); if (activeInventory === id) activeInventory = undefined; });
+ipcMain.handle('names:rename', (event, id, plans, resolution) => { trusted(event); return nameInventory.rename(id, plans, resolution); });
 async function createWindow() {
   window = new BrowserWindow({
     title: "Tag Maestro",
@@ -34,6 +68,7 @@ async function createWindow() {
     backgroundColor: "#151619",
     autoHideMenuBar: process.platform !== "darwin",
     webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'),
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: true,
@@ -99,13 +134,8 @@ app
           ["fileSystem", "clipboard-sanitized-write"].includes(permission),
       );
     });
-    ses.setPermissionCheckHandler((contents, permission, origin) =>
-      Boolean(
-        contents === window?.webContents &&
-        appURL(contents.getURL()) &&
-        appURL(origin) &&
-        ["fileSystem", "clipboard-sanitized-write"].includes(permission),
-      ),
+    ses.setPermissionCheckHandler((contents, permission, origin, details) =>
+      canCheckPermission(contents, permission, origin, details, window?.webContents),
     );
     ses.on("file-system-access-restricted", (_event, _details, callback) => callback("deny"));
     ses.webRequest.onBeforeRequest((details, callback) => {

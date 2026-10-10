@@ -257,7 +257,7 @@ export function BulkFieldEditDialog({
           </select>
           {field === "folder" && (
             <p className="w-full text-xs text-muted-foreground">
-              Folder edits affect exported folder names. Original folders are not renamed on disk.
+              Save originals in the desktop app renames the original album folders without copying songs. Open the parent music library with Add Folder. Browsers cannot rename directories directly.
             </p>
           )}
           <div className="ml-auto flex items-center gap-2">

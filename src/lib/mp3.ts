@@ -1,6 +1,7 @@
 // Client-only audio tag utilities.
 // Reads tags with jsmediatags and writes format-native tags with TagLib-Wasm.
 import jsmediatags from "jsmediatags/dist/jsmediatags.min.js";
+import { parseBlob } from 'music-metadata';
 import type { AudioFile, PropertyMap, TagLib } from "taglib-wasm";
 import { replaceWavArtwork, wavPreservedBytes } from "./wav-artwork";
 import { detectFormat, mimeForFormat, requireTagWritable, type AudioFormat } from "./audio-formats";
@@ -40,6 +41,8 @@ export interface Mp3File {
   file: File;
   sourceHandle?: FileSystemFileHandle;
   sourceDirectoryHandle?: FileSystemDirectoryHandle;
+  /** Parent of the album folder; reacquires handles after a native directory rename. */
+  sourceFolderParentHandle?: FileSystemDirectoryHandle;
   /** Persisted root-folder source used to restore this row after a refresh. */
   librarySourceId?: string;
   libraryRelativePath?: string;
@@ -248,15 +251,33 @@ export async function readMp3(
   sourceDirectoryHandle?: FileSystemDirectoryHandle,
 ): Promise<Mp3File> {
   const format = detectFormat(file);
+  const rp = relativePath || (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name;
+  if (skipAudioDecode && !readEmbeddedCover) {
+    // Random-access Blob reads jump over audio payloads; never decode or materialize PCM.
+    // Keep end tags enabled: WAV LIST/ID3 and MP4 moov commonly follow the audio data.
+    try {
+      const { common: t, format: info } = await parseBlob(file, { duration: false, skipCovers: true });
+      const pair = (number: number | null, total: number | null) => joinNumberPair(number == null ? '' : String(number), total == null ? '' : String(total));
+      const tags: Mp3Tags = {
+        ...emptyTags(), title: t.title || '', artist: t.artist || '', album: t.album || '',
+        albumArtist: t.albumartist || '', composer: t.composer?.[0] || '', year: t.date || (t.year ? String(t.year) : ''),
+        tag: t.grouping || '', genre: t.genre?.[0] || '', discnumber: pair(t.disk.no, t.disk.of), track: pair(t.track.no, t.track.of),
+        comment: t.comment?.[0]?.text || '', bpm: t.bpm == null ? '' : String(t.bpm),
+      };
+      const meta: FileMeta = {
+        ...emptyMeta(), path: rp, codec: info.codec || format.toUpperCase(), size: formatBytes(file.size), modified: new Date(file.lastModified).toLocaleString(),
+        length: formatDuration(info.duration || 0), bitrate: info.bitrate ? `${Math.round(info.bitrate / 1000)} kbps` : '',
+        frequency: info.sampleRate ? `${info.sampleRate} Hz` : '', mode: info.numberOfChannels === 1 ? 'Mono' : info.numberOfChannels === 2 ? 'Stereo' : info.numberOfChannels ? `${info.numberOfChannels}ch` : '',
+      };
+      return audioRow(file, rp, tags, meta, sourceHandle, sourceDirectoryHandle);
+    } catch {
+      // Unusual or damaged formats retain the previous TagLib fallback.
+    }
+  }
   const tags =
     format === "wav"
       ? await queueTagLibRead(() => readWavTags(file, readEmbeddedCover))
       : await readTagsWithJsMedia(file, readEmbeddedCover);
-  const rp =
-    relativePath || (file as File & { webkitRelativePath?: string }).webkitRelativePath || "";
-  const folderName = extractFolderName(rp || file.name);
-  const folderPath = extractFolderPath(rp || file.name);
-
   let arrayBuffer: ArrayBuffer | null = null;
   if (!skipAudioDecode && !technicalMetadata.get(file)?.length) {
     try {
@@ -267,12 +288,18 @@ export async function readMp3(
   }
 
   const meta = await readAudioMeta(file, format, arrayBuffer, skipAudioDecode);
+  meta.path = rp;
+  return audioRow(file, rp, tags, meta, sourceHandle, sourceDirectoryHandle);
+}
+
+export function audioRow(file: File, relativePath: string, tags: Mp3Tags, meta: FileMeta, sourceHandle?: FileSystemFileHandle, sourceDirectoryHandle?: FileSystemDirectoryHandle): Mp3File {
+  const folderName = extractFolderName(relativePath), folderPath = extractFolderPath(relativePath);
   return {
     id: crypto.randomUUID(),
     file,
     sourceHandle,
     sourceDirectoryHandle,
-    format,
+    format: detectFormat(file),
     tags,
     meta,
     original: structuredClone({ ...tags, cover: tags.cover ? { ...tags.cover } : undefined }),
@@ -281,6 +308,20 @@ export async function readMp3(
     folderPath,
     editedFolderName: folderName,
   };
+}
+
+/** Selection loads picture bytes on demand, not the entire audio payload. */
+export async function readEmbeddedArtwork(file: File): Promise<Mp3Tags['cover']> {
+  try {
+    const metadata = await parseBlob(file, { duration: false, skipCovers: false });
+    const pictures = metadata.common.picture || [];
+    const picture = pictures.find(item => item.type?.toLowerCase().includes('front')) || pictures[0];
+    if (!picture) return undefined;
+    const data = new Uint8Array(picture.data), mime = picture.format || 'image/jpeg';
+    return { data, mime, dataUrl: u8ToDataUrl(data, mime) };
+  } catch {
+    return (await readMp3(file, undefined, true, true)).tags.cover;
+  }
 }
 
 export async function writeTagsToBlob(m: Mp3File): Promise<Blob> {
