@@ -42,6 +42,8 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      - name: Check publication privacy before building
+        run: node scripts/check-publication-privacy.mjs
       - name: Validate tag
         shell: bash
         env:
