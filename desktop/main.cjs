@@ -1,8 +1,7 @@
-const { app, BrowserWindow, Menu, protocol, session, net, dialog, ipcMain } = require("electron");
+const { app, BrowserWindow, Menu, protocol, session, dialog, ipcMain, shell } = require("electron");
 const path = require("node:path");
-const fs = require("node:fs/promises");
-const { pathToFileURL } = require("node:url");
-const { ORIGIN, appURL, assetPath } = require("./security.cjs");
+const { ORIGIN, appURL } = require("./security.cjs");
+const { createAssetSnapshot } = require("./bundle-assets.cjs");
 const { canCheckPermission } = require('./permissions.cjs');
 const test = process.argv.includes("--desktop-self-test");
 const stage = process.argv.find((arg) => arg.startsWith("--test-stage="))?.split("=")[1] || "write";
@@ -43,12 +42,13 @@ ipcMain.handle('folders:choose-root', async (event, expectedName) => {
 });
 ipcMain.handle('folders:prepare', (event, token, plans) => { trusted(event); return folderRenames.prepare(token, plans); });
 ipcMain.handle('folders:commit', (event, transaction) => { trusted(event); return folderRenames.commit(transaction); });
-ipcMain.handle('names:choose-root', async (event) => {
+ipcMain.handle('names:choose-root', async (event, includeSubfolders = false) => {
   trusted(event);
+  if (typeof includeSubfolders !== 'boolean') throw new Error('Invalid subfolder option');
   const result = await dialog.showOpenDialog(window, { title: 'Choose a library for fast folder and archive renaming', properties: ['openDirectory'], buttonLabel: 'Load names only' });
   if (result.canceled || !result.filePaths.length) return null;
   if (activeInventory) await nameInventory.release(activeInventory);
-  const job = await nameInventory.start(result.filePaths[0]);
+  const job = await nameInventory.start(result.filePaths[0], includeSubfolders);
   activeInventory = job.id;
   return job;
 });
@@ -57,6 +57,27 @@ ipcMain.handle('names:save-progress', (event, id) => { trusted(event); return na
 ipcMain.handle('names:stop', (event, id) => { trusted(event); nameInventory.stop(id); });
 ipcMain.handle('names:release', async (event, id) => { trusted(event); await nameInventory.release(id); if (activeInventory === id) activeInventory = undefined; });
 ipcMain.handle('names:rename', (event, id, plans, resolution) => { trusted(event); return nameInventory.rename(id, plans, resolution); });
+let metadataLookup;
+function metadataService() {
+  return metadataLookup ||= new (require('./metadata-lookup.cjs').MetadataLookup)(path.join(app.getPath('userData'), 'album-metadata-cache'));
+}
+ipcMain.handle('metadata:status', event => { trusted(event); return { ready: true, version: app.getVersion() }; });
+ipcMain.handle('metadata:lookup', (event, input) => {
+  trusted(event);
+  const requestId = typeof input?.requestId === 'string' && /^[a-zA-Z0-9_-]{1,80}$/.test(input.requestId) ? input.requestId : undefined;
+  return metadataService().request(input, progress => {
+    if(requestId && !event.sender.isDestroyed()) event.sender.send('metadata:progress', {requestId,...progress});
+  });
+});
+ipcMain.handle('metadata:spotify-token', (event, token) => { trusted(event); return metadataService().setSpotifyToken(token); });
+ipcMain.handle('metadata:open-source', async (event, value) => {
+  trusted(event);
+  const { publicURL, publicAddress } = require('./metadata-lookup.cjs');
+  const url = publicURL(value);
+  const addresses = await require('node:dns/promises').lookup(url.hostname, { all: true });
+  if (!addresses.length || addresses.some(a => !publicAddress(a.address))) throw new Error('Use a public album source.');
+  await shell.openExternal(url.href);
+});
 async function createWindow() {
   window = new BrowserWindow({
     title: "Tag Maestro",
@@ -107,24 +128,7 @@ app
   .then(async () => {
     const ses = session.fromPartition("persist:tagmaestro");
     const root = path.join(app.getAppPath(), "dist-desktop");
-    ses.protocol.handle("tagmaestro", async (request) => {
-      const target = assetPath(root, request.url);
-      if (!target || !["GET", "HEAD"].includes(request.method))
-        return new Response("Not found", { status: 404 });
-      try {
-        if (!(await fs.stat(target)).isFile()) return new Response("Not found", { status: 404 });
-        const response = await net.fetch(pathToFileURL(target).href);
-        const headers = new Headers(response.headers);
-        headers.set("Content-Security-Policy", CSP);
-        headers.set("X-Content-Type-Options", "nosniff");
-        return new Response(request.method === "HEAD" ? null : response.body, {
-          status: response.status,
-          headers,
-        });
-      } catch {
-        return new Response("Not found", { status: 404 });
-      }
-    });
+    ses.protocol.handle("tagmaestro", await createAssetSnapshot(root, CSP));
     // FSA capabilities still come exclusively from Chromium's user-chosen file/folder pickers.
     ses.setPermissionRequestHandler((contents, permission, callback, details) => {
       callback(

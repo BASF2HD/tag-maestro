@@ -7,9 +7,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-latest
+          - os: macos-15
             command: dist:mac
             binary: dist-package/mac-arm64/Tag Maestro.app/Contents/MacOS/Tag Maestro
+          - os: macos-15-intel
+            command: dist:mac:intel
+            binary: dist-package/mac/Tag Maestro.app/Contents/MacOS/Tag Maestro
           - os: windows-latest
             command: dist:win
             binary: dist-package/win-unpacked/Tag Maestro.exe
@@ -24,15 +27,12 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: node scripts/test-table-settings.mjs
-      - run: node scripts/test-desktop-security.mjs
-      - run: node scripts/test-desktop-permissions.mjs
-      - run: node scripts/test-folder-renames.mjs
-      - run: node scripts/test-folder-save.mjs
-      - run: node scripts/test-name-inventory.mjs
-      - run: node scripts/test-nas-metadata.mjs
-      - run: node scripts/test-file-saving.mjs
-      - run: node scripts/test-library-metadata.mjs
+      - run: node scripts/test-release.mjs
+      - name: Test album tools and filename conversion
+        run: |
+          pnpm exec electron scripts/test-album-tools-ui.cjs
+          pnpm exec electron scripts/test-filename-extraction-ui.cjs
+          pnpm exec electron scripts/test-bundle-assets-ui.cjs
       - run: pnpm run ${{ matrix.command }}
       - run: node scripts/test-desktop.mjs "${{ matrix.binary }}"
       - uses: actions/upload-artifact@v4

@@ -15,6 +15,16 @@ for (const name of await readdir(directory)) {
 }
 const files = (await readdir(directory)).filter(name => !name.startsWith('.') && name !== 'SHA256SUMS').sort();
 if (!files.length) throw new Error('No release assets');
+if (process.argv.includes('--require-desktop-set')) {
+  const { version } = JSON.parse(await readFile('package.json', 'utf8'));
+  const expected = [
+    ...['arm64', 'x64'].flatMap(arch => ['dmg', 'zip'].map(ext => `Tag.Maestro-${version}-mac-${arch}.${ext}`)),
+    ...['Setup', 'Portable'].map(kind => `Tag.Maestro-${version}-win-x64-${kind}.exe`),
+  ];
+  if (files.length !== expected.length || expected.some(name => !files.includes(name)))
+    throw new Error('Incomplete desktop release: require Apple Silicon and Intel Mac DMG/ZIP plus Windows Setup/Portable for ' + version);
+}
+
 const sums = await Promise.all(files.map(async name => {
   const hash = createHash('sha256').update(await readFile(path.join(directory, name))).digest('hex');
   return hash + '  ' + name;

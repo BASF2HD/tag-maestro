@@ -12,6 +12,12 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { FilenameExtractionControls } from "@/components/FilenameExtractionControls";
+import {
+  DEFAULT_FILENAME_EXTRACTION,
+  extractFilenameText,
+  type FilenameExtractionRule,
+} from "@/lib/filename-extraction";
 import type { Mp3File } from "@/lib/mp3";
 import {
   CONVERTER_FIELDS,
@@ -42,7 +48,12 @@ const PRESETS: Record<ConverterMode, string[]> = {
     "%artist% - %title%",
     "%albumartist% - %album% - $num(%track%,2) - %title%",
   ],
-  "filename-tag": ["%track% - %title%", "%artist% - %title%", "%artist%/%album%/%track% - %title%"],
+  "filename-tag": [
+    "%track% - %title%",
+    "%artist% - %title%",
+    "%album% - %track% - %title%",
+    "%artist%/%album%/%track% - %title%",
+  ],
   "tag-tag": ["%artist%", "%album%", "%albumartist% - %album%", "%filename%"],
 };
 
@@ -76,6 +87,9 @@ export function TagConverterDialog({
   const [format, setFormat] = useState(DEFAULT_FORMAT["filename-tag"]);
   const [targetField, setTargetField] = useState<ConverterTagKey>("albumArtist");
   const [placeholder, setPlaceholder] = useState("");
+  const [filenameMethod, setFilenameMethod] = useState<"pattern" | "extract">("pattern");
+  const [extraction, setExtraction] = useState<FilenameExtractionRule>(DEFAULT_FILENAME_EXTRACTION);
+  const [extractionTarget, setExtractionTarget] = useState<ConverterTagKey>("album");
 
   useEffect(() => {
     if (open) setPlaceholder("");
@@ -107,6 +121,25 @@ export function TagConverterDialog({
         continue;
       }
 
+      if (filenameMethod === "extract") {
+        const next = extractFilenameText(file.file.name, extraction);
+        if (next === null) {
+          unmatched += 1;
+          continue;
+        }
+        const before = file.tags[extractionTarget] || "";
+        if (next !== before) {
+          changes.set(file.id, { tags: { [extractionTarget]: next } });
+          preview.push({
+            id: file.id,
+            filename: file.file.name,
+            before: `${fieldLabel(extractionTarget)}: ${before || "<empty>"}`,
+            after: `${fieldLabel(extractionTarget)}: ${next}`,
+          });
+        }
+        continue;
+      }
+
       const parsed = parseFilenameTemplate(file, format);
       if (!parsed) {
         unmatched += 1;
@@ -132,7 +165,7 @@ export function TagConverterDialog({
       }
     }
     return { changes, preview, unmatched };
-  }, [files, format, mode, targetField]);
+  }, [files, format, mode, targetField, filenameMethod, extraction, extractionTarget]);
 
   function changeMode(nextMode: ConverterMode) {
     setMode(nextMode);
@@ -154,7 +187,7 @@ export function TagConverterDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex h-auto max-h-[86vh] max-w-3xl flex-col overflow-hidden p-0">
-        <DialogHeader className="border-b border-border px-4 py-3">
+        <DialogHeader className="shrink-0 border-b border-border px-4 py-3">
           <div className="flex items-center gap-2">
             <div className="grid h-8 w-8 place-items-center rounded-md bg-primary/15 text-primary">
               <Type className="h-4 w-4" />
@@ -168,149 +201,199 @@ export function TagConverterDialog({
           </div>
         </DialogHeader>
 
-        <div
-          className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-border bg-sidebar/20 px-4 py-2"
-          role="group"
-          aria-label="Conversion direction"
-        >
-          <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-            Direction
-          </span>
-          <label className="flex cursor-pointer items-center gap-1.5 text-xs text-foreground">
-            <input
-              type="checkbox"
-              checked={mode === "tag-filename"}
-              onChange={() => changeMode("tag-filename")}
-              className="h-3.5 w-3.5 accent-primary"
-            />
-            Tag → Filename
-          </label>
-          <label className="flex cursor-pointer items-center gap-1.5 text-xs text-foreground">
-            <input
-              type="checkbox"
-              checked={mode === "filename-tag"}
-              onChange={() => changeMode("filename-tag")}
-              className="h-3.5 w-3.5 accent-primary"
-            />
-            Filename → Tag
-          </label>
-          <label className="flex cursor-pointer items-center gap-1.5 text-xs text-foreground">
-            <input
-              type="checkbox"
-              checked={mode === "tag-tag"}
-              onChange={() => changeMode("tag-tag")}
-              className="h-3.5 w-3.5 accent-primary"
-            />
-            Tag → Tag
-          </label>
-        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <div
+            className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-border bg-sidebar/20 px-4 py-2"
+            role="group"
+            aria-label="Conversion direction"
+          >
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Direction
+            </span>
+            <label className="flex cursor-pointer items-center gap-1.5 text-xs text-foreground">
+              <input
+                type="checkbox"
+                checked={mode === "tag-filename"}
+                onChange={() => changeMode("tag-filename")}
+                className="h-3.5 w-3.5 accent-primary"
+              />
+              Tag → Filename
+            </label>
+            <label className="flex cursor-pointer items-center gap-1.5 text-xs text-foreground">
+              <input
+                type="checkbox"
+                checked={mode === "filename-tag"}
+                onChange={() => changeMode("filename-tag")}
+                className="h-3.5 w-3.5 accent-primary"
+              />
+              Filename → Tag
+            </label>
+            <label className="flex cursor-pointer items-center gap-1.5 text-xs text-foreground">
+              <input
+                type="checkbox"
+                checked={mode === "tag-tag"}
+                onChange={() => changeMode("tag-tag")}
+                className="h-3.5 w-3.5 accent-primary"
+              />
+              Tag → Tag
+            </label>
+          </div>
 
-        <div className="grid grid-cols-[minmax(0,1fr)_180px] gap-3 border-b border-border bg-background px-4 py-3">
-          {mode === "tag-tag" && (
-            <div className="space-y-1">
-              <Label htmlFor="converter-target" className="text-[11px] text-muted-foreground">
-                Target field
-              </Label>
-              <select
-                id="converter-target"
-                value={targetField}
-                onChange={(event) => setTargetField(event.currentTarget.value as ConverterTagKey)}
-                className="h-8 w-full border border-input bg-background px-2 text-xs text-foreground outline-none focus:border-primary"
-              >
-                {CONVERTER_FIELDS.map((field) => (
-                  <option key={field.key} value={field.key}>
-                    {field.label}
-                  </option>
-                ))}
-              </select>
+          {mode === "filename-tag" && (
+            <div
+              className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-border px-4 py-2"
+              role="radiogroup"
+              aria-label="Filename conversion method"
+            >
+              <label className="flex cursor-pointer items-center gap-1.5 text-xs">
+                <input
+                  type="radio"
+                  name="filename-conversion-method"
+                  value="pattern"
+                  checked={filenameMethod === "pattern"}
+                  onChange={() => setFilenameMethod("pattern")}
+                  className="h-3.5 w-3.5 accent-primary"
+                />
+                Format pattern
+              </label>
+              <label className="flex cursor-pointer items-center gap-1.5 text-xs">
+                <input
+                  type="radio"
+                  name="filename-conversion-method"
+                  value="extract"
+                  checked={filenameMethod === "extract"}
+                  onChange={() => setFilenameMethod("extract")}
+                  className="h-3.5 w-3.5 accent-primary"
+                />
+                Extract part of filename
+              </label>
             </div>
           )}
-          <div className={`space-y-1 ${mode === "tag-tag" ? "" : "col-span-1"}`}>
-            <Label htmlFor="converter-format" className="text-[11px] text-muted-foreground">
-              Format string
-            </Label>
-            <Input
-              id="converter-format"
-              list={`converter-presets-${mode}`}
-              value={format}
-              onChange={(event) => setFormat(event.target.value)}
-              className="h-8 font-mono text-xs"
+
+          {mode === "filename-tag" && filenameMethod === "extract" ? (
+            <FilenameExtractionControls
+              rule={extraction}
+              onChange={setExtraction}
+              target={extractionTarget}
+              onTargetChange={setExtractionTarget}
             />
-            <datalist id={`converter-presets-${mode}`}>
-              {PRESETS[mode].map((preset) => (
-                <option key={preset} value={preset} />
-              ))}
-            </datalist>
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor="converter-field" className="text-[11px] text-muted-foreground">
-              Insert field
-            </Label>
-            <select
-              id="converter-field"
-              value={placeholder}
-              onChange={(event) => insertPlaceholder(event.currentTarget.value)}
-              className="h-8 w-full border border-input bg-background px-2 text-xs text-foreground outline-none focus:border-primary"
-            >
-              <option value="">Choose field…</option>
-              {FORMAT_PLACEHOLDERS.map((value) => (
-                <option key={value} value={value}>
-                  {value}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        <div className="flex items-center justify-between border-b border-border bg-sidebar/20 px-4 py-2">
-          <span className="text-[11px] font-semibold uppercase text-muted-foreground">Preview</span>
-          <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
-            {mode === "filename-tag" && result.unmatched > 0 && (
-              <span>{result.unmatched} unmatched</span>
-            )}
-            <span>{result.changes.size} changes</span>
-          </div>
-        </div>
-
-        <ScrollArea className="max-h-24 shrink-0">
-          {result.preview.length ? (
-            <div className="divide-y divide-border/60">
-              {(() => {
-                const row = result.preview[0];
-                return (
-                <div
-                  key={row.id}
-                  className="grid grid-cols-[150px_minmax(0,1fr)_20px_minmax(0,1fr)] items-center gap-2 px-4 py-2 text-xs"
-                >
-                  <span className="truncate text-muted-foreground" title={row.filename}>
-                    {row.filename}
-                  </span>
-                  <span className="truncate font-mono text-muted-foreground" title={row.before}>
-                    {row.before || "<empty>"}
-                  </span>
-                  <ArrowRight className="h-3.5 w-3.5 text-muted-foreground" />
-                  <span className="truncate font-mono text-foreground" title={row.after}>
-                    {row.after || "<empty>"}
-                  </span>
-                </div>
-                );
-              })()}
-              {result.preview.length > 1 && (
-                <div className="px-4 py-2 text-center text-[11px] text-muted-foreground">
-                  Showing one example from {result.preview.length} changes.
+          ) : (
+            <div className="grid grid-cols-[minmax(0,1fr)_180px] gap-3 border-b border-border bg-background px-4 py-3">
+              {mode === "tag-tag" && (
+                <div className="space-y-1">
+                  <Label htmlFor="converter-target" className="text-[11px] text-muted-foreground">
+                    Target field
+                  </Label>
+                  <select
+                    id="converter-target"
+                    value={targetField}
+                    onChange={(event) =>
+                      setTargetField(event.currentTarget.value as ConverterTagKey)
+                    }
+                    className="h-8 w-full border border-input bg-background px-2 text-xs text-foreground outline-none focus:border-primary"
+                  >
+                    {CONVERTER_FIELDS.map((field) => (
+                      <option key={field.key} value={field.key}>
+                        {field.label}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               )}
-            </div>
-          ) : (
-            <div className="grid h-16 place-items-center text-xs text-muted-foreground">
-              {mode === "filename-tag" && result.unmatched
-                ? "Format does not match the filenames"
-                : "No changes"}
+              <div className={`space-y-1 ${mode === "tag-tag" ? "" : "col-span-1"}`}>
+                <Label htmlFor="converter-format" className="text-[11px] text-muted-foreground">
+                  Format string
+                </Label>
+                <Input
+                  id="converter-format"
+                  list={`converter-presets-${mode}`}
+                  value={format}
+                  onChange={(event) => setFormat(event.target.value)}
+                  className="h-8 font-mono text-xs"
+                />
+                <datalist id={`converter-presets-${mode}`}>
+                  {PRESETS[mode].map((preset) => (
+                    <option key={preset} value={preset} />
+                  ))}
+                </datalist>
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="converter-field" className="text-[11px] text-muted-foreground">
+                  Insert field
+                </Label>
+                <select
+                  id="converter-field"
+                  value={placeholder}
+                  onChange={(event) => insertPlaceholder(event.currentTarget.value)}
+                  className="h-8 w-full border border-input bg-background px-2 text-xs text-foreground outline-none focus:border-primary"
+                >
+                  <option value="">Choose field…</option>
+                  {FORMAT_PLACEHOLDERS.map((value) => (
+                    <option key={value} value={value}>
+                      {value}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
           )}
-        </ScrollArea>
 
-        <DialogFooter className="items-center justify-between border-t border-border px-4 py-3 sm:space-x-0">
+          <div className="flex items-center justify-between border-b border-border bg-sidebar/20 px-4 py-2">
+            <span className="text-[11px] font-semibold uppercase text-muted-foreground">
+              Preview
+            </span>
+            <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
+              {mode === "filename-tag" && result.unmatched > 0 && (
+                <span>
+                  {result.unmatched} {filenameMethod === "extract" ? "skipped" : "unmatched"}
+                </span>
+              )}
+              <span>{result.changes.size} changes</span>
+            </div>
+          </div>
+
+          <ScrollArea className="max-h-24 shrink-0">
+            {result.preview.length ? (
+              <div className="divide-y divide-border/60">
+                {(() => {
+                  const row = result.preview[0];
+                  return (
+                    <div
+                      key={row.id}
+                      className="grid grid-cols-[150px_minmax(0,1fr)_20px_minmax(0,1fr)] items-center gap-2 px-4 py-2 text-xs"
+                    >
+                      <span className="truncate text-muted-foreground" title={row.filename}>
+                        {row.filename}
+                      </span>
+                      <span className="truncate font-mono text-muted-foreground" title={row.before}>
+                        {row.before || "<empty>"}
+                      </span>
+                      <ArrowRight className="h-3.5 w-3.5 text-muted-foreground" />
+                      <span className="truncate font-mono text-foreground" title={row.after}>
+                        {row.after || "<empty>"}
+                      </span>
+                    </div>
+                  );
+                })()}
+                {result.preview.length > 1 && (
+                  <div className="px-4 py-2 text-center text-[11px] text-muted-foreground">
+                    Showing one example from {result.preview.length} changes.
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="grid h-16 place-items-center text-xs text-muted-foreground">
+                {mode === "filename-tag" && result.unmatched
+                  ? filenameMethod === "extract"
+                    ? "No extractable text. Check the separator, number occurrence or positions."
+                    : "Format does not match the filenames"
+                  : "No changes"}
+              </div>
+            )}
+          </ScrollArea>
+        </div>
+
+        <DialogFooter className="shrink-0 items-center justify-between border-t border-border px-4 py-3 sm:space-x-0">
           <Badge variant="outline" className="h-5 rounded-sm text-[11px]">
             {result.changes.size} file{result.changes.size === 1 ? "" : "s"}
           </Badge>

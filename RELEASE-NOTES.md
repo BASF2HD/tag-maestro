@@ -1,23 +1,26 @@
-# Tag Maestro 1.0.7
+# Tag Maestro 1.1.0
 
-Clean-checkout icon generation now creates its output directory automatically.
+Bulk album artwork updates, online singer credits and flexible filename-to-tag extraction are now available in standalone builds for Apple Silicon, Intel Mac and Windows.
 
-Manage music tags, embedded cover artwork and library names locally.
-
-- Fast, paginated folder/archive-name mode for ZIP, RAR, 7z and tar archives: no extraction or audio-tag reads.
-- Rename originals in place; conflict choices include skip, cancel and overwrite with recoverable hidden sibling backups.
-- Live rename progress, changed/skipped counts, current item and clear completion feedback.
-- NAS-friendly partial metadata reads, concurrent scanning, lazy artwork and metadata caching.
-- Verified tag/artwork saves, playback/seek controls, immediate single/bulk file deletion and persistent table settings.
-- Codex cover-cleanup batch export/import, before/after review and individual or bulk approval.
+- Find front covers in each album’s Covers folder, review them, and replace embedded front artwork across selected albums with verified saves.
+- Double-click editor cover art to view the full-resolution image, with Fit and 100% views.
+- Look up album and track metadata through Apple’s catalog, Spotify, Wikipedia, and supplied Apple Music, Spotify, JioSaavn and Deezer album links.
+- Review fetched singers, album artist, composer, year and other available fields, including values protected by existing tags or source priority.
+- Preview supplied-page singer credits and choose that page for Artist / singers while other fields retain their normal source priority.
+- Match Tamil titles across English spelling differences, with manual song choices when Female/Male or other versions are ambiguous.
+- Follow lookup progress, source responses and elapsed time while checking albums.
+- Extract part of a filename into a tag using separators, numbers, numbered parts or character positions, with a live preview.
+- Keep the current tag engine and artwork tools available when a local development build replaces generated assets.
+- Choose whether names-only scans include subfolders, trim leftover rename whitespace and show clearer invalid-name messages.
 
 ## Downloads
 
-Apple Silicon: DMG installer or ZIP containing the standalone .app.
-Windows x64: Setup installer or Portable EXE. No Node.js or separate browser required.
+- Apple Silicon Mac (arm64): DMG installer and app ZIP.
+- Intel Mac (x64): DMG installer and app ZIP.
+- Windows x64: Setup installer and Portable EXE.
 
-**Unsigned community builds:** Apple notarization and Windows code signing are not configured. Gatekeeper/SmartScreen may warn; verify the repository, version and SHA256SUMS before opening. Do not bypass protections for an untrusted download.
+No Node.js, separate browser or development server is needed. SHA256SUMS contains checksums for all six downloads. Each platform’s packaged app is tested on its native GitHub runner before publication.
 
-Metadata/artwork/deletion and restart-persistence checks run on the actual packaged app on native Mac and Windows runners before publication. Tests use disposable synthetic files, not personal music.
+These community builds are unsigned and not Apple-notarized, as in earlier releases. Metadata updates remain staged until Apply and Save originals; existing tags are protected unless replacement is enabled. Source credits and catalog dates vary by edition, so review the proposed changes before saving.
 
-Back up your music. Song deletion is immediate and permanent. Overwritten name conflicts preserve the previous destination as a hidden sibling backup, not a merge.
+Back up originals before bulk edits. Tests use disposable synthetic files and isolated app profiles, never personal music.

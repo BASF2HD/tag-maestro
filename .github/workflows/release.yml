@@ -19,12 +19,16 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-latest
-            platform: mac
+          - os: macos-15
+            platform: mac-arm64
             command: dist:mac
             binary: dist-package/mac-arm64/Tag Maestro.app/Contents/MacOS/Tag Maestro
+          - os: macos-15-intel
+            platform: mac-x64
+            command: dist:mac:intel
+            binary: dist-package/mac/Tag Maestro.app/Contents/MacOS/Tag Maestro
           - os: windows-latest
-            platform: windows
+            platform: windows-x64
             command: dist:win
             binary: dist-package/win-unpacked/Tag Maestro.exe
     runs-on: ${{ matrix.os }}
@@ -35,6 +39,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
       - uses: pnpm/action-setup@v4
         with:
           version: 11.25.0
@@ -51,6 +56,11 @@ jobs:
         run: node -e "if ('v' + require('./package.json').version !== process.env.RELEASE_TAG) throw new Error('Tag does not match package version')"
       - run: pnpm install --frozen-lockfile
       - run: node scripts/test-release.mjs
+      - name: Test album tools and filename conversion
+        run: |
+          pnpm exec electron scripts/test-album-tools-ui.cjs
+          pnpm exec electron scripts/test-filename-extraction-ui.cjs
+          pnpm exec electron scripts/test-bundle-assets-ui.cjs
       - run: pnpm run ${{ matrix.command }}
       - name: Test the packaged app (isolated synthetic media only)
         run: node scripts/test-desktop.mjs "${{ matrix.binary }}"
@@ -72,6 +82,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
       - uses: actions/download-artifact@v4
         with:
           pattern: release-*
@@ -80,8 +91,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - run: node scripts/release-checksums.mjs release-assets
-      - name: Publish only after both native builds and packaged tests pass
+      - run: node scripts/release-checksums.mjs release-assets --require-desktop-set
+      - name: Publish only after all three native builds and packaged tests pass
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}

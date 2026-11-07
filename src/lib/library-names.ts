@@ -8,7 +8,7 @@ export const originalArchiveSuffix = (entry: NameEntry) =>
 /** Literal text only, including regex punctuation and dollar signs in replacement. */
 export function replaceName(name: string, find: string, replacement: string, matchCase: boolean) {
   if (!find) return name;
-  if (matchCase) return name.split(find).join(replacement);
+  if (matchCase) return name.includes(find) ? name.split(find).join(replacement).trim() : name;
   const haystack = name.toLowerCase(),
     needle = find.toLowerCase();
   let cursor = 0,
@@ -18,5 +18,6 @@ export function replaceName(name: string, find: string, replacement: string, mat
     result += name.slice(cursor, index) + replacement;
     cursor = index + find.length;
   }
-  return result + name.slice(cursor);
+  // Removing a suffix can leave an extra space that makes the proposed name invalid.
+  return cursor ? (result + name.slice(cursor)).trim() : name;
 }

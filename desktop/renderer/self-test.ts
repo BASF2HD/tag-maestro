@@ -1,3 +1,4 @@
+import { metadataFromPage } from "../../src/lib/album-page-metadata";
 import {
   readMp3,
   writeCoverToBlob,
@@ -70,8 +71,47 @@ export async function runDesktopSelfTest() {
     try { await window.tagMaestroDesktop!.pollNameSaveProgress('invalid-test-capability'); } catch { refused = true; }
     check(refused, 'Live save progress refuses unknown native library capabilities');
     passed.push('live save-progress bridge bundled and scoped');
+    check((await window.tagMaestroDesktop?.metadataStatus?.())?.ready, 'Metadata background service ready');
+    check(typeof window.tagMaestroDesktop?.lookupMetadata === 'function', 'Album metadata service bundled');
+    check(typeof window.tagMaestroDesktop?.setSpotifyToken === 'function', 'Spotify credential bridge bundled');
+    check(await window.tagMaestroDesktop!.setSpotifyToken('') === false, 'Empty Spotify token clears session credentials');
+    refused = false;
+    try { await window.tagMaestroDesktop!.lookupMetadata({ provider: 'apple', action: 'details', id: '../../invalid' }); } catch { refused = true; }
+    check(refused, 'Metadata bridge rejects invalid provider identifiers');
+    refused = false;
+    try { await window.tagMaestroDesktop!.openMetadataSource('file:///private/invalid'); } catch { refused = true; }
+    check(refused, 'Source opener refuses non-HTTPS sources');
+    passed.push('album metadata IPC bundled, credentials session-only, unsafe requests rejected');
     const defaults = defaultTableSettings(["album", "track", "title"], ["album", "title"]);
     const stage = new URL(location.href).searchParams.get("selftest");
+    if (stage === 'metadata') {
+      const result = await window.tagMaestroDesktop!.lookupMetadata({provider:'apple',action:'details',url:'https://music.apple.com/au/album/aayasu-nooru-original-motion-picture-soundtrack-ep/1836809310'});
+      const album = result.json?.results?.find((item: any) => item.wrapperType === 'collection');
+      const songs = result.json?.results?.filter((item: any) => item.wrapperType === 'track');
+      check(album?.collectionId === 1836809310 && songs?.length === 5, 'Actual desktop IPC retrieves Apple album and five tracks');
+      passed.push('live Apple lookup through the desktop service: AU album link and five songs');
+      document.documentElement.dataset.desktopTest = JSON.stringify({ok:true,stage,passed});
+      return;
+    }
+    if(stage==='pages') {
+      const events: {requestId:string;message:string}[]=[];
+      const unsubscribe=window.tagMaestroDesktop!.onMetadataProgress?.(event=>events.push(event));
+      for(const [provider,url] of [
+        ['jiosaavn','https://www.jiosaavn.com/album/nenjil-oru-raagam/v-a3CHXG-Zo_'],
+        ['spotify','https://open.spotify.com/album/4M6G1spdcjW0IBfn2MmsrB'],
+        ['deezer','https://www.deezer.com/en/album/172720832'],
+      ] as const) {
+        const result=await window.tagMaestroDesktop!.lookupMetadata({provider:'web',action:'page',url,requestId:`desktop-page-${provider}`});
+        const data=metadataFromPage(result,url);
+        check(data.provider===provider&&data.tracks.length===6,'Actual desktop page reader retrieves six tracks from '+provider);
+        check(Boolean(data.tracks[0].artist?.includes('P. Jayachandran')),'Per-song artist credit from '+provider);
+        if(provider==='jiosaavn') check(data.values.composer==='T. Rajendar','Explicit JioSaavn composer credit');
+      }
+      await new Promise(resolve=>setTimeout(resolve,30));unsubscribe?.();
+      check(events.some(event=>event.requestId==='desktop-page-jiosaavn')&&events.some(event=>event.requestId==='desktop-page-spotify')&&events.some(event=>event.requestId==='desktop-page-deezer'),'Live progress events reach the renderer for each source request');
+      passed.push('live JioSaavn/Spotify/Deezer public album links: six tracks, per-song artists and live IPC progress');
+      document.documentElement.dataset.desktopTest=JSON.stringify({ok:true,stage,passed});return;
+    }
     const root = await navigator.storage.getDirectory();
     if (stage === "read") {
       check(

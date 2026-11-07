@@ -1,6 +1,6 @@
 {
   "name": "tag-maestro",
-  "version": "1.0.7",
+  "version": "1.1.0",
   "description": "Local music tags, cover artwork and library management",
   "author": "Tag Maestro",
   "main": "desktop/main.cjs",
@@ -20,7 +20,8 @@
     "pack:desktop": "pnpm build:desktop && pnpm build:desktop:icon && electron-builder --config electron-builder.yml --dir --publish never",
     "dist:mac": "pnpm build:desktop && pnpm build:desktop:icon && electron-builder --config electron-builder.yml --mac --arm64 --publish never",
     "dist:win": "pnpm build:desktop && pnpm build:desktop:icon && electron-builder --config electron-builder.yml --win --x64 --publish never",
-    "test:desktop": "node scripts/test-desktop.mjs"
+    "test:desktop": "node scripts/test-desktop.mjs",
+    "dist:mac:intel": "pnpm build:desktop && pnpm build:desktop:icon && electron-builder --config electron-builder.yml --mac --x64 --publish never"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.2.1",

@@ -14,7 +14,8 @@ const {
 class NameInventory {
   jobs = new Map();
   grants = new FolderRenames();
-  async start(root) {
+  async start(root, includeSubfolders = false) {
+    if (typeof includeSubfolders !== "boolean") throw new Error("Invalid subfolder option");
     const grant = await this.grants.grant(root);
     const scope = this.grants.roots.get(grant.token);
     this.grants.roots.delete(grant.token);
@@ -22,6 +23,7 @@ class NameInventory {
     const job = {
       id,
       name: grant.name,
+      includeSubfolders,
       scope,
       entries: [],
       byId: new Map(),
@@ -42,7 +44,7 @@ class NameInventory {
       .finally(() => {
         job.done = true;
       });
-    return { id, name: job.name };
+    return { id, name: job.name, includeSubfolders };
   }
   async walk(job) {
     const queue = [""];
@@ -77,7 +79,7 @@ class NameInventory {
           const entry = { id: randomUUID(), relative, name: child.name, kind };
           job.entries.push(entry);
           job.byId.set(entry.id, entry);
-          if (kind === "folder") queue.push(relative);
+          if (kind === "folder" && job.includeSubfolders) queue.push(relative);
         }
       } catch (error) {
         job.warningCount++;
@@ -183,7 +185,12 @@ class NameInventory {
             throw new Error("Invalid or duplicate listed item");
           this.progress(job, { current: entry.relative });
           sources.add(entry.relative);
-          const name = folderName(plan.name);
+          let name;
+          try {
+            name = folderName(plan.name);
+          } catch (error) {
+            throw new Error(`Cannot rename ${JSON.stringify(entry.relative)}: ${error.message || error}`);
+          }
           if (name === entry.name) throw new Error("An unchanged item was selected");
           if (
             entry.kind === "archive" &&

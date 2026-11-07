@@ -21,7 +21,10 @@ export function LibraryNamesDialog({
   onSaved: () => Promise<void>;
   hasDirtyFiles: boolean;
 }) {
-  const [job, setJob] = useState<{ id: string; name: string } | null>(null);
+  const [job, setJob] = useState<{ id: string; name: string; includeSubfolders: boolean } | null>(
+    null,
+  );
+  const [includeSubfolders, setIncludeSubfolders] = useState(false);
   const [entries, setEntries] = useState<NameEntry[]>([]);
   const [done, setDone] = useState(true),
     [saving, setSaving] = useState(false),
@@ -137,7 +140,7 @@ export function LibraryNamesDialog({
     if (!api) return;
     setChoosing(true);
     try {
-      const next = await api.chooseNameLibrary();
+      const next = await api.chooseNameLibrary(includeSubfolders);
       if (!next) return;
       activeJob.current = next.id;
       offset.current = 0;
@@ -148,6 +151,7 @@ export function LibraryNamesDialog({
       setSaveReport([]);
       setSaveProgress(null);
       setPage(0);
+      setStatus("Listing directory entries…");
       setDone(false);
       setJob(next);
     } catch (error) {
@@ -303,7 +307,16 @@ export function LibraryNamesDialog({
             library directories in place.
           </p>
         )}
-        <div className="flex gap-2 items-center">
+        <div className="flex gap-2 items-center flex-wrap">
+          <label className="text-xs flex gap-1 items-center">
+            <input
+              type="checkbox"
+              checked={includeSubfolders}
+              disabled={!api || locked || choosing || !done}
+              onChange={(event) => setIncludeSubfolders(event.target.checked)}
+            />
+            Include subfolders
+          </label>
           <Button
             size="sm"
             disabled={!api || locked || choosing || !done}
@@ -318,6 +331,14 @@ export function LibraryNamesDialog({
             </Button>
           )}
         </div>
+        <p className="text-xs text-muted-foreground">
+          Unchecked: list only immediate folders and archives, without opening subfolders. Choose a
+          library folder to apply this option.
+          {job &&
+            (job.includeSubfolders
+              ? " Current list includes subfolders."
+              : " Current list is immediate items only.")}
+        </p>
         <p className="text-xs text-muted-foreground break-words" role="status">
           {status}
         </p>
@@ -362,6 +383,10 @@ export function LibraryNamesDialog({
             Match case
           </label>
         </div>
+        <p className="text-xs text-muted-foreground">
+          Find matches literal text, including every space you enter. Only matching names change;
+          leftover spaces at the beginning and end of the new name are removed.
+        </p>
         <div className="overflow-auto min-h-0 border rounded-[4px]">
           <table className="w-full text-xs">
             <thead className="sticky top-0 bg-background">
@@ -515,7 +540,9 @@ export function LibraryNamesDialog({
               </p>
             )}
             {saveProgress.error && (
-              <p className="text-xs text-amber-500 break-words">{saveProgress.error}</p>
+              <p role="alert" className="text-xs text-amber-500 break-words whitespace-pre-wrap">
+                Save stopped: {saveProgress.error}
+              </p>
             )}
           </section>
         )}

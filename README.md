@@ -17,10 +17,11 @@ These are actual app screens with synthetic demo songs and artwork. No personal 
 | Computer | Download | How to run |
 | --- | --- | --- |
 | Apple Silicon Mac | `.dmg` or Mac `.zip` | Open the DMG and copy the app to Applications, or unzip and open the `.app` to try it first. |
+| Intel Mac | x64 `.dmg` or Mac `.zip` | Open the DMG and copy the app to Applications, or unzip and open the `.app`. |
 | Windows x64 | `Setup.exe` | Run the installer; choose its destination. |
 | Windows x64, no installation | `Portable.exe` | Run the portable executable. |
 
-No Node.js, development tools or separate browser are needed for these packages. Current Mac downloads are arm64, not Intel Mac builds. Downloads are unsigned and not Apple-notarized; an operating-system warning is expected. Verify the version, source and `SHA256SUMS` from the same release. Do not disable system security globally to run an unfamiliar download.
+No Node.js, development tools or separate browser are needed for these packages. Choose arm64 for Apple Silicon Macs or x64 for Intel Macs. Downloads are unsigned and not Apple-notarized; an operating-system warning is expected. Verify the version, source and `SHA256SUMS` from the same release. Do not disable system security globally to run an unfamiliar download.
 
 The GitHub Pages site is a download/information page. It is not the desktop app.
 
@@ -38,6 +39,7 @@ The GitHub Pages site is a download/information page. It is not the desktop app.
 
 - Edit title, artist, album, album artist, composer, genre, year, track, disc number, tag, comment and BPM. Multi-selection supports keeping existing values, setting a shared value or clearing a field, including comments.
 - Bulk editing has a **Target field** selector for tags, filename and folder name. Operations include literal/regular-expression find/replace, case-sensitive matching, prefix/suffix, insert/remove, case conversion and whitespace cleanup.
+- **Convert Tags → Filename → Tag → Extract part of filename** copies text before/after a custom separator or number, a numbered part (optionally counted from the end), or a range of character positions into your chosen tag. For `Aayusu Nooru - 02 - Brahmadevan.mp3`, choose **Text before separator**, separator `-`, occurrence **1**, and destination **Album** to get `Aayusu Nooru`. Check the live preview, click **Apply**, then **Save**. Extensions are excluded, and empty/missing matches are skipped. The existing format-pattern converter remains available.
 - Additional tools convert tags, extract text into tags, split text across tags and reload tags from files.
 - Drag columns to reorder them; column widths, visibility, sorting and page-size preferences persist across reloads. Album is the default sort column.
 - Row actions offer play/pause, quick seek and deletion. The bottom bar adds previous/next, seek and selected-song deletion. The playing row is brought into view; deleting the playing song advances to the next available song.
@@ -116,13 +118,43 @@ pnpm desktop         # build and launch Electron
 Build on the target OS/architecture:
 
 ```sh
-pnpm dist:mac        # macOS arm64: DMG and app ZIP
+pnpm dist:mac        # macOS Apple Silicon arm64: DMG and app ZIP
+pnpm dist:mac:intel  # macOS Intel x64: DMG and app ZIP
 pnpm dist:win        # Windows x64: Setup and Portable EXE
 node scripts/test-release.mjs
 node scripts/test-desktop.mjs "path/to/packaged/executable"
 node scripts/check-publication-privacy.mjs
 ```
 
-GitHub release builds test both native packaged executables using temporary synthetic media and isolated app profiles before publishing installers/checksums. Tests cover scoped original writes/renames, artwork, playback and persistence. The Pages workflow publishes `site/`, not your library or local app settings.
+GitHub release builds test all three native packaged executables using temporary synthetic media and isolated app profiles before publishing installers/checksums. Tests cover scoped original writes/renames, artwork, playback and persistence. The Pages workflow publishes `site/`, not your library or local app settings.
 
 [Desktop architecture, security and build notes](DESKTOP-APP.md) · [Publication privacy policy](PUBLISHING.md)
+
+
+### Bulk front covers and album metadata
+
+Load the parent music library with **Add Folder**. Select tracks/albums, or clear the selection to target all loaded files.
+
+- **Tools → Update covers from folders** (also in the editor): scan `Covers/` or `Cover/` for front JPG/PNG/WebP files, including `Aayusunooru_Front.jpg`. Back images are ignored. If no front exists there, scan beside the songs. Choose explicitly when several front files exist. Preview, then **Replace front artwork & save**. Each original is written and verified sequentially. Existing front art is replaced, other picture types/text tags/source images are preserved. Pending text edits remain in the editor; pending artwork edits are skipped. Stop finishes the current write. Save failures are reported by album/file; rescan before retrying.
+- **Tools → Look up album metadata**: search per album using **Apple catalog (iTunes) → Spotify → Wikipedia → supplied web page**, in that order. A lower source fills fields absent from higher sources. Exact, unambiguous album names can load automatically; select editions manually for ambiguous results. Review every selected album before applying. Fields include album, year, album artist, composer, song title, performer/singers (Artist), genre, track and disc number. Unavailable credits stay untouched. Release dates can be reissues, and Wikipedia film dates can differ from soundtrack dates.
+- Song credits use unique title/filename matches. Optional number matching must be enabled explicitly. Metadata fills empty tags by default; enable **Replace existing values** when desired. Applying changes stages them in the editor; **Save originals** writes them to disk.
+- Apple and English Wikipedia work without credentials. Spotify requires your own developer API access token, set inside the dialog for this app session; it is never persisted. Other web pages must contain explicit MusicAlbum structured data; paste an individual album HTTPS URL. Unsupported pages need manual credits. Source links open in your browser.
+- Metadata requests use a seven-day disk cache and Apple calls are spaced to respect the documented approximate limit. A 500-album first lookup can take an hour or more. Stop keeps completed results. Local/private network pages are blocked; provider requests run in the desktop service without widening the renderer network policy.
+
+Apple lookups tolerate Tamil-to-English transliteration differences. A failed album-title query broadens to individual words, then available song/artist clues; results are ranked by similar spellings. Soundtrack and EP suffixes are ignored when matching. A suggested album loads automatically only when song matches corroborate the spelling and its year does not conflict; uncertain editions remain a manual choice. Song matching also accepts unique close spellings, with the matched title shown in the review. Paste an **Apple Music album link** into the album search field to fetch its exact album ID and storefront, bypassing name search.
+
+The desktop process retains its small application code bundle in memory, including lazy JavaScript and WASM. Rebuilding the local app can clean `dist-desktop` without breaking tag/artwork operations in an already-open editor. Fully quit and reopen to use a new build. A missing dynamically imported module in a session started before this fix requires reopening the app; replacing an album JPEG is unrelated.
+
+Double-click artwork in the editor or folder-cover preview to open its original-resolution image. The viewer shows pixel dimensions and offers Fit to window and Actual size (100%) with scrolling. Cover/metadata dialogs share compact 32px controls and 12px body/button text. Apple Music album links work in both the search field and album webpage field; a desktop-service health check reports a required full restart instead of repeated raw IPC errors.
+
+The album metadata review shows every fetched field alongside the current tag, source and write status. Already-matching values, protected existing credits, disabled fields and missing metadata remain visible. **Show only changes** optionally filters the review. To replace populated artist/composer/album-artist tags, select those fields and enable **Replace existing values**; fill-empty mode remains the default.
+
+Supplied album URLs support Apple Music, Spotify public album pages/embeds, and JioSaavn album page data. Spotify URL credits do not need an API token; automated Spotify catalog search still requires one. No remote page scripts are executed and no audio is fetched. Public-page artists are imported as credited, explicit composer credits are used when available, and missing fields remain unchanged. Other websites still need supported structured album data. A supplied URL is included when you run bulk lookup again.
+
+Bulk metadata lookup displays a persistent progress panel with the current album/source, elapsed time, completed album/source counts, a spinner and a progress bar. Desktop progress reports cache hits, active requests and Apple rate-limit waits. Stop keeps completed results.
+
+When a catalog credits a music director on every song, load a better page and enable **Prefer this page for Artist / singers**. This changes the source preference for track artists only; album/year/album-artist/composer keep their usual source priority. Existing file tags are still protected unless **Replace existing values** is enabled. The supplied-page artist panel shows all fetched song credits, the number of matched local files, and whether another source or existing tag is blocking them. **Use JioSaavn for Artist / singers** (or the loaded source’s name) selects that page for the Artist field and enables the field for review; it still requires explicit replacement, review, Apply and Save originals to overwrite music-file tags.
+
+Deezer album links are supported through Deezer’s public album/track metadata, including main and featured performers, explicit track/disc numbers and labeled composer credits when available. No audio is fetched. The catalog release date can describe a digital reissue.
+
+Song matching compares words and common spelling differences, so `Vasantham Aadi Vara` can suggest `Vasantham Padi/Paadi Vara`. Female/Male and other version labels remain distinct: ambiguous versions need an explicit choice under **Song matching**. Each local song has an Automatic/source-song/skip selector; choices feed into the metadata review and never change files until you apply and save. Optional number matching uses track/disc tags or a filename number when available.

@@ -10,7 +10,18 @@ function segments(value) {
   return parts;
 }
 function folderName(value) {
-  if (typeof value !== 'string' || !value.trim() || value !== value.trim() || /[<>:"/\\|?*\x00-\x1f]/.test(value) || /[. ]$/.test(value) || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.|$)/i.test(value)) throw new Error('Invalid folder name: ' + value);
+  const invalid = (reason) => { throw new Error('Invalid folder name: ' + JSON.stringify(value) + '. ' + reason); };
+  if (typeof value !== 'string') invalid('Enter a text name.');
+  if (!value.trim()) invalid('The new name is empty. Enter a name or adjust Find and Replace.');
+  if (value !== value.trim()) {
+    const edges = [value !== value.trimStart() && 'beginning', value !== value.trimEnd() && 'end'].filter(Boolean).join(' and ');
+    invalid('Whitespace at the ' + edges + ' is not allowed. Remove whitespace at the beginning or end.');
+  }
+  const characters = [...new Set(value.match(/[<>:"/\\|?*\x00-\x1f]/g) || [])];
+  if (characters.length) invalid('Remove unsupported characters: ' + characters.map(character => JSON.stringify(character)).join(', ') + '.');
+  if (value === '.' || value === '..') invalid('Use a name other than "." or "..".');
+  if (value.endsWith('.')) invalid('A name cannot end with a period. Remove the final period.');
+  if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.|$)/i.test(value)) invalid('This name is reserved by Windows. Choose a different name.');
   segments(value);
   return value;
 }

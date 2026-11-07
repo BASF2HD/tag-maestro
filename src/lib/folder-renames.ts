@@ -4,11 +4,11 @@ type Plan = { relative: string; name: string; anchor: { name: string; size: numb
 type Receipt = { relative: string; name: string };
 declare global {
   interface Window {
-    tagMaestroDesktop?: {
+    tagMaestroDesktop?: import('./album-metadata').MetadataBridge & {
       chooseRenameRoot(name: string): Promise<{ token: string; name: string } | null>;
       prepareFolderRenames(token: string, plans: Plan[]): Promise<string>;
       commitFolderRenames(transaction: string): Promise<{ renamed: Receipt[]; error?: string }>;
-      chooseNameLibrary(): Promise<{ id: string; name: string } | null>;
+      chooseNameLibrary(includeSubfolders?: boolean): Promise<{ id: string; name: string; includeSubfolders: boolean } | null>;
       pollNameLibrary(id: string, offset: number): Promise<{ entries: NameEntry[]; total: number; visited: number; done: boolean; stopped: boolean; warnings: string[]; warningCount: number; ignored: { extension: string; count: number }[] }>;
       stopNameLibrary(id: string): Promise<void>;
       pollNameSaveProgress(id: string): Promise<NameSaveProgress | null>;

@@ -52,6 +52,9 @@ import {
 import { FolderRenameDialog } from "@/components/FolderRenameDialog";
 import { LibraryNamesDialog } from "@/components/LibraryNamesDialog";
 import { readMetadataCache, saveMetadataCache } from '@/lib/metadata-cache';
+import { CoverArtImage } from '@/components/CoverArtImage';
+import { AlbumCoversDialog } from '@/components/AlbumCoversDialog';
+import { AlbumMetadataDialog } from '@/components/AlbumMetadataDialog';
 import { CoverCleanupDialog } from "@/components/CoverCleanupDialog";
 import { EditableTableCell as TdCell } from "@/components/EditableTableCell";
 import { writeVerifiedFile } from "@/lib/verified-file-write";
@@ -355,6 +358,8 @@ export function TagMaestro() {
   const [folderRenameOpen, setFolderRenameOpen] = useState(false);
   const [libraryNamesOpen, setLibraryNamesOpen] = useState(false);
   const [coverCleanupOpen, setCoverCleanupOpen] = useState(false);
+  const [albumCoversOpen, setAlbumCoversOpen] = useState(false);
+  const [albumMetadataOpen, setAlbumMetadataOpen] = useState(false);
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
   const [converterOpen, setConverterOpen] = useState(false);
   const [extractTextOpen, setExtractTextOpen] = useState(false);
@@ -1410,6 +1415,28 @@ export function TagMaestro() {
         files={selectedFiles.length ? selectedFiles : files}
         onApply={handleSplitText}
       />
+      <AlbumCoversDialog
+        open={albumCoversOpen} onOpenChange={setAlbumCoversOpen}
+        files={selectedFiles.length ? selectedFiles : files}
+        onSaved={({ row, file: saved, cover }) => {
+          setFiles(previous => previous.map(item => item.id !== row.id ? item : {
+            ...item, file: saved, coverEdited: false,
+            tags: { ...item.tags, cover }, original: { ...item.original, cover },
+            meta: { ...item.meta, size: `${(saved.size / (1024 * 1024)).toFixed(2)} MB`, modified: new Date(saved.lastModified).toLocaleString() },
+          }));
+        }}
+      />
+      <AlbumMetadataDialog
+        open={albumMetadataOpen} onOpenChange={setAlbumMetadataOpen}
+        files={selectedFiles.length ? selectedFiles : files}
+        onApply={patches => {
+          setFiles(previous => previous.map(item => {
+            const patch = patches.get(item.id);
+            return patch ? { ...item, tags: { ...item.tags, ...patch }, dirty: true } : item;
+          }));
+          toast.success(`Updated metadata in the editor for ${patches.size} tracks. Save originals to write the files.`);
+        }}
+      />
       {/* Header */}
       <CoverCleanupDialog
         open={coverCleanupOpen}
@@ -1533,8 +1560,10 @@ export function TagMaestro() {
         <ToolbarMenu
           label="Tools"
           icon={Wand2}
-          disabled={!files.length}
+          disabled={!files.length || Boolean(busy || importProgress)}
           items={[
+            { label: "Update covers from folders", onSelect: () => setAlbumCoversOpen(true) },
+            { label: "Look up album metadata", onSelect: () => setAlbumMetadataOpen(true) },
             { label: "Rename folders", onSelect: () => setFolderRenameOpen(true) },
             { label: "Bulk edit", onSelect: () => setBulkEditOpen(true) },
             { label: "Convert tags", onSelect: () => setConverterOpen(true) },
@@ -1691,6 +1720,8 @@ export function TagMaestro() {
                 count={selectedFiles.length}
                 selectedFiles={selectedFiles}
                 onChange={(key, value) => applyToSelected({ [key]: value })}
+                onFindAlbumCover={() => setAlbumCoversOpen(true)}
+                onLookupAlbum={() => setAlbumMetadataOpen(true)}
                 onCoverPick={onCoverFile}
                 onCoverDelete={() => applyToSelected({ cover: undefined })}
                 onCollapse={() => setEditorCollapsed(true)}
@@ -3103,6 +3134,8 @@ function EditorPanel({
   count,
   selectedFiles,
   onChange,
+  onFindAlbumCover,
+  onLookupAlbum,
   onCoverPick,
   onCoverDelete,
   onCollapse,
@@ -3111,6 +3144,8 @@ function EditorPanel({
   count: number;
   selectedFiles: Mp3File[];
   onChange: (key: TagKey, value: string) => void;
+  onFindAlbumCover: () => void;
+  onLookupAlbum: () => void;
   onCoverPick: (file: File) => void;
   onCoverDelete: () => void;
   onCollapse: () => void;
@@ -3176,12 +3211,7 @@ function EditorPanel({
             className="group relative grid aspect-square place-items-center overflow-hidden rounded-md border border-border bg-background/40"
           >
             {tags.cover?.dataUrl ? (
-              <img
-src={tags.cover.dataUrl}
-                alt="Embedded cover art"
-                title="Cover art embedded in the selected song (or your unsaved artwork edit)"
-                className="h-full w-full object-contain"
-              />
+              <CoverArtImage src={tags.cover.dataUrl} alt="Embedded cover art" className="h-full w-full object-contain" />
             ) : (
               <div className="text-center text-xs text-muted-foreground">
                 <ImageIcon className="mx-auto mb-1 h-6 w-6 opacity-50" />
@@ -3193,7 +3223,7 @@ src={tags.cover.dataUrl}
                 <Button
                   size="sm"
                   variant="secondary"
-                  className="h-6 flex-1 px-2 text-[11px]"
+                  className="flex-1 px-2"
                   onClick={() => coverInput.current?.click()}
                   title="Upload cover art"
                 >
@@ -3204,7 +3234,7 @@ src={tags.cover.dataUrl}
                   <Button
                     size="sm"
                     variant="ghost"
-                    className="h-6 px-2 text-[11px] text-destructive hover:bg-destructive/10 hover:text-destructive"
+                    className="px-2 text-destructive hover:bg-destructive/10 hover:text-destructive"
                     onClick={onCoverDelete}
                     title="Delete cover art"
                   >
@@ -3215,6 +3245,8 @@ src={tags.cover.dataUrl}
               </div>
             )}
           </div>
+          <Button variant="outline" size="sm" className="mt-2 w-full text-xs" disabled={!count} onClick={onFindAlbumCover}>Find front cover in album folder</Button>
+          <Button variant="outline" size="sm" className="mt-1 w-full text-xs" disabled={!count} onClick={onLookupAlbum}>Look up album metadata</Button>
           <input
             ref={coverInput}
             type="file"

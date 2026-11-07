@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
 import { mkdtemp, mkdir, writeFile, readFile, stat, symlink, realpath } from "node:fs/promises";
 import { createRequire } from "node:module";
 import os from "node:os";
@@ -29,7 +30,45 @@ try {
   if (!["EPERM", "EACCES"].includes(error.code)) throw error;
 }
 const engine = new NameInventory();
-const job = await engine.start(library);
+await assert.rejects(engine.start(library, "true"), /Invalid subfolder option/);
+// Prove the default never opens an album directory, even though nested candidates exist.
+const opened = [];
+const originalOpendir = fs.opendir;
+let shallowJob;
+try {
+  fs.opendir = async (...args) => {
+    opened.push(args[0]);
+    return originalOpendir(...args);
+  };
+  shallowJob = await engine.start(library);
+  await engine.jobs.get(shallowJob.id).task;
+} finally {
+  fs.opendir = originalOpendir;
+}
+const shallow = engine.poll(shallowJob.id);
+assert.equal(shallowJob.includeSubfolders, false);
+assert.equal(shallow.done, true);
+assert.deepEqual(opened, [library]);
+assert.equal(shallow.entries.length, 7);
+assert.equal(
+  shallow.entries.some((entry) => entry.relative.includes("/")),
+  false,
+);
+const shallowFolder = shallow.entries.find((entry) => entry.name === "Album Old");
+assert.equal(
+  (await engine.rename(shallowJob.id, [{ id: shallowFolder.id, name: "Album Direct" }])).renamed
+    .length,
+  1,
+);
+assert.deepEqual(await readFile(path.join(library, "Album Direct", "Music.ZIP")), contents);
+assert.equal(
+  (await engine.rename(shallowJob.id, [{ id: shallowFolder.id, name: "Album Old" }])).renamed
+    .length,
+  1,
+);
+await engine.release(shallowJob.id);
+const job = await engine.start(library, true);
+assert.equal(job.includeSubfolders, true);
 await engine.jobs.get(job.id).task;
 const listed = engine.poll(job.id);
 assert.equal(listed.done, true);
@@ -132,5 +171,5 @@ for (;;) {
 assert.equal(count, 5000);
 await engine.release(largeJob.id);
 console.log(
-  `PASS: ZIP/folder listing, literal archive extensions, scoped IDs, collisions/traversal/parent-child safety, original bytes/inode/mtime preserved; 5,000 local fixture folders listed in ${Math.round(performance.now() - started)} ms. No user files touched.`,
+  `PASS: immediate-only listing opens no subfolders; optional recursive listing, folder/ZIP renames, scoped IDs, collisions/traversal/parent-child safety, original bytes/inode/mtime preserved; 5,000 local fixture folders listed in ${Math.round(performance.now() - started)} ms. No user files touched.`,
 );

@@ -6,11 +6,14 @@ directories:
 files:
   - desktop/main.cjs
   - desktop/security.cjs
+  - desktop/bundle-assets.cjs
   - desktop/permissions.cjs
   - desktop/preload.cjs
   - desktop/folder-renames.cjs
   - desktop/name-inventory.cjs
+  - desktop/metadata-lookup.cjs
   - shared/archive-formats.mjs
+  - shared/metadata-matching.mjs
   - dist-desktop/**/*
   - "!node_modules/**/*"
 asar: true

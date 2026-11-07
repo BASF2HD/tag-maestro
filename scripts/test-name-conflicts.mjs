@@ -25,7 +25,7 @@ async function fixture(label, folders = false) {
       await fs.writeFile(path.join(library, name), text);
   }
   const engine = new NameInventory(),
-    job = await engine.start(library);
+    job = await engine.start(library, folders);
   await engine.jobs.get(job.id).task;
   const entries = engine.poll(job.id).entries;
   const ids = new Map(entries.map((item) => [item.relative, item.id]));
